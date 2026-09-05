@@ -3,7 +3,13 @@
 #
 #     ./build.sh              build (needs root for mkarchiso)
 #     ./build.sh --check      verify prerequisites and print the plan, build nothing
-#     ./build.sh --clean      remove the work directory and start fresh
+#     ./build.sh --assemble    assemble the profile but do not run mkarchiso.
+#                              Needs no root, so the overlay can be inspected
+#                              and diffed before committing to a 20GB build.
+#     ./build.sh --clean      remove the work directory and exit
+#     ./build.sh --reuse      keep the existing work directory. Faster, but
+#                             mkarchiso skips steps it has already done, so the
+#                             packages will be the ones downloaded last time.
 #
 # The profile is assembled on top of archiso's stock `releng` profile rather
 # than vendored into this repo. releng carries the bootloader configs for
@@ -33,13 +39,28 @@ warn() { printf '    %s!%s %s\n' "$C_Y" "$C_0" "$1"; }
 die()  { printf '\n%sERROR:%s %s\n' "$C_R" "$C_0" "$1" >&2; exit 1; }
 
 CHECK_ONLY=0
+ASSEMBLE_ONLY=0
+REUSE_WORK=0
 for a in "$@"; do
     case "$a" in
-        --check) CHECK_ONLY=1 ;;
-        --clean) rm -rf "$WORK"; ok "removed $WORK"; exit 0 ;;
+        --check)    CHECK_ONLY=1 ;;
+        --assemble) ASSEMBLE_ONLY=1 ;;
+        --reuse)    REUSE_WORK=1 ;;
+        --clean)
+            rm -rf "$HERE/work-assemble" 2>/dev/null || true
+            rm -rf "$WORK" 2>/dev/null \
+                || die "cannot remove $WORK (root-owned from a previous build) — sudo $0 --clean"
+            ok "removed the work directories"; exit 0 ;;
         *) die "unknown option: $a" ;;
     esac
 done
+
+# A real build runs under sudo and leaves a root-owned work directory behind.
+# --assemble runs as your user and must not trip over it, so it gets its own.
+if [[ $ASSEMBLE_ONLY -eq 1 && $EUID -ne 0 ]]; then
+    WORK="$HERE/work-assemble"
+    PROFILE="$WORK/profile"
+fi
 
 # ── prerequisites ─────────────────────────────────────────────────────────────
 step "Checking prerequisites"
@@ -65,10 +86,16 @@ if [[ $CHECK_ONLY -eq 1 ]]; then
     exit 0
 fi
 
-[[ $EUID -eq 0 ]] || die "mkarchiso needs root:  sudo $0"
-
 # ── assemble the profile ──────────────────────────────────────────────────────
 step "Assembling profile"
+# mkarchiso marks completed steps with files in the work directory and skips
+# them on a rerun (see _run_once in /usr/bin/mkarchiso). Reusing a work dir
+# therefore repackages the packages downloaded last time and silently produces
+# a stale ISO, so start clean unless explicitly told not to.
+if [[ -d $WORK && $REUSE_WORK -eq 0 ]]; then
+    warn "removing the previous work directory (--reuse to keep it)"
+    rm -rf "$WORK" 2>/dev/null || die "cannot remove $WORK (root-owned from a previous build) — sudo $0 --clean"
+fi
 rm -rf "$PROFILE"; mkdir -p "$PROFILE" "$OUT"
 cp -r "$RELENG/." "$PROFILE/"
 ok "copied stock releng profile"
@@ -89,11 +116,25 @@ ok "branded as $ISO_NAME ($ISO_LABEL)"
 
 # ── the repo itself, so the live session can install from it ──────────────────
 AIR="$PROFILE/airootfs"
-install -d "$AIR/usr/local/share/hyprland-setup"
-tar -C "$REPO" \
-    --exclude=.git --exclude=iso/work --exclude=iso/out \
-    -cf - . | tar -C "$AIR/usr/local/share/hyprland-setup" -xf -
-ok "embedded the repo at /usr/local/share/hyprland-setup"
+# An allowlist, not an exclude list. `tar -C "$REPO" -cf - .` emits members as
+# "./iso/out/...", which --exclude=iso/out does not match — so the 2.5GB ISO
+# from the previous build was being copied into the next one. Naming what goes
+# in cannot fail that way.
+DEST="$AIR/usr/local/share/hyprland-setup"
+install -d "$DEST"
+for item in install.sh README.md config; do
+    cp -r "$REPO/$item" "$DEST/"
+done
+install -d "$DEST/iso"
+for item in build.sh extract-packages.sh test-boot.sh archinstall.json README.md; do
+    cp "$HERE/$item" "$DEST/iso/"
+done
+
+# The payload is source, so anything near a megabyte means something large got
+# swept in — exactly the failure this replaced.
+size_kb=$(du -sk "$DEST" | cut -f1)
+[[ $size_kb -lt 5120 ]] || die "embedded payload is ${size_kb}KB — something large was included"
+ok "embedded the repo at /usr/local/share/hyprland-setup (${size_kb}KB)"
 
 # ── live user with the desktop config already in place ────────────────────────
 # archiso's airootfs/etc/{passwd,shadow,group} are plain files; append rather
@@ -122,6 +163,17 @@ cp -r "$REPO/config/." "$AIR/home/${LIVE_USER}/.config/"
 install -d "$AIR/etc/skel/.config"
 cp -r "$REPO/config/." "$AIR/etc/skel/.config/"
 ok "desktop config placed in the live home and /etc/skel"
+
+# install.sh normally generates monitors.lua from the detected displays, but
+# live media has no idea what it will boot on. An explicit catch-all is clearer
+# than leaning on Hyprland's implicit default, and hyprland.lua treats the file
+# as optional either way.
+cat > "$AIR/home/${LIVE_USER}/.config/hypr/monitors.lua" <<'EOF'
+-- Live media: accept whatever displays are attached.
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = "auto" })
+EOF
+cp "$AIR/home/${LIVE_USER}/.config/hypr/monitors.lua" "$AIR/etc/skel/.config/hypr/monitors.lua"
+ok "live monitors.lua (auto-detect)"
 
 # ── autologin straight into Hyprland ──────────────────────────────────────────
 install -d "$AIR/etc/systemd/system/getty@tty1.service.d"
@@ -159,20 +211,35 @@ chmod 755 "$AIR/usr/local/bin/install-hyprarch"
 ok "install-hyprarch helper"
 
 # archiso needs every airootfs file's mode declared in profiledef.sh.
+#
+# The trailing slash on the home directory is load-bearing: mkarchiso only
+# recurses when the path ends in "/" (see the chown -fhR branch in
+# /usr/bin/mkarchiso). Without it just the directory is chowned and the whole
+# desktop config underneath stays root-owned, so the live session cannot write
+# to its own ~/.config and Hyprland comes up broken.
 python3 - "$PROFILE" "$LIVE_USER" <<'PY'
 import re, sys, pathlib
 prof, user = pathlib.Path(sys.argv[1]), sys.argv[2]
 pd = prof / "profiledef.sh"
 s = pd.read_text()
 extra = f'''  ["/usr/local/bin/install-hyprarch"]="0:0:755"
-  ["/home/{user}"]="1000:1000:750"
-  ["/home/{user}/.bash_profile"]="1000:1000:644"
+  ["/home/{user}/"]="1000:1000:755"
   ["/etc/sudoers.d/00-live"]="0:0:440"
 '''
 s = re.sub(r'(file_permissions=\(\n)', r'\1' + extra, s, count=1)
 pd.write_text(s)
 print("    ✓ file permissions declared")
 PY
+
+if [[ $ASSEMBLE_ONLY -eq 1 ]]; then
+    step "Assembled (not built)"
+    echo "    profile: $PROFILE"
+    echo "    packages: $(wc -l < "$PROFILE/packages.x86_64")"
+    printf '\n    Build it with:  sudo %s\n\n' "$0"
+    exit 0
+fi
+
+[[ $EUID -eq 0 ]] || die "mkarchiso needs root:  sudo $0"
 
 step "Building"
 echo "    This downloads ~2GB and takes 10-30 minutes."

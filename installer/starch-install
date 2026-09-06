@@ -68,17 +68,43 @@ preflight() {
 # archinstall unmounts the target when it finishes, so the root filesystem has
 # to be found again. A partition that has both /var/lib/pacman and /etc/fstab
 # is an installed Arch system; anything else is someone else's disk.
+# A partition holding both /var/lib/pacman and /etc/fstab is an installed Arch
+# system. Two wrinkles, both of which archinstall produces by default for the
+# options people actually pick:
+#
+#   btrfs  root lives on the @ subvolume, so a plain mount of the partition
+#          shows @/var/lib/pacman rather than /var/lib/pacman.
+#   LUKS   the partition will not mount at all until it is unlocked, so an
+#          encrypted install is invisible here. Say so rather than reporting
+#          "nothing found", which sends people looking for the wrong problem.
+#
+# Emits "device<TAB>mount-options", the options being whatever the real
+# read-write mount also needs (the subvolume, for btrfs).
 find_target_root() {
-    local dev tmp=/run/hyprarch-probe found=()
+    local dev fstype tmp=/run/starch-probe found=() locked=()
     mkdir -p "$tmp"
-    while read -r dev; do
-        mount -o ro "$dev" "$tmp" 2>/dev/null || continue
-        if [[ -d $tmp/var/lib/pacman && -f $tmp/etc/fstab ]]; then
-            found+=("$dev")
+
+    while read -r dev fstype; do
+        if [[ $fstype == crypto_LUKS ]]; then
+            locked+=("$dev")
+            continue
         fi
-        umount "$tmp" 2>/dev/null
-    done < <(lsblk -pnro NAME,TYPE | awk '$2=="part"{print $1}')
+
+        if mount -o ro "$dev" "$tmp" 2>/dev/null; then
+            if [[ -d $tmp/var/lib/pacman && -f $tmp/etc/fstab ]]; then
+                found+=("$dev	")
+            elif [[ -d $tmp/@/var/lib/pacman && -f $tmp/@/etc/fstab ]]; then
+                found+=("$dev	subvol=@")
+            fi
+            umount "$tmp" 2>/dev/null
+        fi
+    done < <(lsblk -pnro NAME,TYPE,FSTYPE | awk '$2=="part"{print $1, $3}')
+
     rmdir "$tmp" 2>/dev/null
+
+    if [[ ${#locked[@]} -gt 0 ]]; then
+        printf 'LOCKED	%s\n' "${locked[@]}"
+    fi
     # An empty array still emits one blank line through printf, which the
     # caller would read back as a single candidate named "".
     [[ ${#found[@]} -gt 0 ]] && printf '%s\n' "${found[@]}"
@@ -87,12 +113,16 @@ find_target_root() {
 
 # ── stage 2: put the desktop on the new system ────────────────────────────────
 apply_desktop() {
-    local root_dev="$1"
+    local root_dev="$1" mount_opts="${2:-}"
 
-    step "Mounting $root_dev"
+    step "Mounting $root_dev${mount_opts:+ ($mount_opts)}"
     mountpoint -q "$TARGET" && umount -R "$TARGET" 2>/dev/null
     mkdir -p "$TARGET"
-    mount "$root_dev" "$TARGET" || { err "could not mount $root_dev"; return 1; }
+    if [[ -n $mount_opts ]]; then
+        mount -o "$mount_opts" "$root_dev" "$TARGET" || { err "could not mount $root_dev"; return 1; }
+    else
+        mount "$root_dev" "$TARGET" || { err "could not mount $root_dev"; return 1; }
+    fi
 
     # Bring up the rest of the target's filesystems — the ESP especially, since
     # a bootloader or kernel update inside the chroot writes to it.
@@ -175,22 +205,35 @@ EOF
     fi
 
     step "Stage 2: the desktop"
-    mapfile -t roots < <(find_target_root)
-    local target=""
+    local -a roots=() locked=()
+    while IFS= read -r line; do
+        [[ $line == LOCKED* ]] && locked+=("${line#LOCKED	}") || roots+=("$line")
+    done < <(find_target_root)
+
+    if [[ ${#locked[@]} -gt 0 ]]; then
+        warn "encrypted partitions found, which cannot be inspected while locked:"
+        printf '      %s\n' "${locked[@]}"
+        say  "      Unlock with: cryptsetup open <device> root"
+        say  "      then re-run:  starch-install --desktop-only"
+    fi
+
+    local target="" opts=""
     case ${#roots[@]} in
         0) err "no installed Arch system found on any disk"
-           say "    If archinstall did finish, run this and pick the root partition:"
+           say "    If archinstall did finish, unlock any encrypted volume and run:"
            say "      starch-install --desktop-only"
            return 1 ;;
-        1) target="${roots[0]}"; ok "found the new system on $target" ;;
+        1) target="${roots[0]%%	*}"; opts="${roots[0]#*	}"
+           ok "found the new system on $target" ;;
         *) say "    More than one Arch install found:"
-           local i=1; for r in "${roots[@]}"; do say "      $i) $r"; ((i++)); done
+           local i=1; for r in "${roots[@]}"; do say "      $i) ${r%%	*}"; ((i++)); done
            read -rp "    Which one did you just install? [1-${#roots[@]}] " n
-           target="${roots[$((n-1))]:-}"
-           [[ -n $target ]] || { err "no selection"; return 1; } ;;
+           local pick="${roots[$((n-1))]:-}"
+           [[ -n $pick ]] || { err "no selection"; return 1; }
+           target="${pick%%	*}"; opts="${pick#*	}" ;;
     esac
 
-    apply_desktop "$target" || return 1
+    apply_desktop "$target" "$opts" || return 1
 
     step "Done"
     say "    Remove the install media and reboot."
@@ -202,11 +245,22 @@ EOF
 
 # ── menu ──────────────────────────────────────────────────────────────────────
 [[ ${1:-} == --desktop-only ]] && {
-    mapfile -t roots < <(find_target_root)
-    say "Installed Arch systems found:"; printf '  %s\n' "${roots[@]:-none}"
+    say "Scanning for installed Arch systems..."
+    found_any=0
+    while IFS= read -r line; do
+        found_any=1
+        if [[ $line == LOCKED* ]]; then
+            say "  ${line#LOCKED	}  (encrypted — unlock it first)"
+        else
+            dev="${line%%	*}"; mo="${line#*	}"
+            say "  ${dev}${mo:+  [$mo]}"
+        fi
+    done < <(find_target_root)
+    [[ $found_any -eq 1 ]] || say "  none"
     read -rp "Root partition to set up (e.g. /dev/sda2): " d
     [[ -b $d ]] || { err "$d is not a block device"; exit 1; }
-    apply_desktop "$d"; exit $?
+    read -rp "Mount options, blank for none (btrfs root is usually subvol=@): " o
+    apply_desktop "$d" "$o"; exit $?
 }
 
 while true; do

@@ -4,6 +4,7 @@
 #     ./test-boot.sh              UEFI boot, graphical window
 #     ./test-boot.sh --headless   serial console only, for a machine with no display
 #     ./test-boot.sh --bios       legacy BIOS instead of UEFI
+#     ./test-boot.sh --monitor    also expose QEMU's monitor on a unix socket
 set -euo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,11 +25,12 @@ command -v qemu-system-x86_64 >/dev/null || {
 # refuses to start unless the backend has GL turned on explicitly ("-display gtk"
 # alone is not enough, it must be "gtk,gl=on"), and in headless mode there is no
 # display to attach it to at all.
-MODE=uefi; DISPLAY_ARGS=(-device virtio-vga-gl -display gtk,gl=on)
+MODE=uefi; MONITOR=0; DISPLAY_ARGS=(-device virtio-vga-gl -display gtk,gl=on)
 for a in "$@"; do
     case "$a" in
         --headless) DISPLAY_ARGS=(-nographic) ;;
         --bios)     MODE=bios ;;
+        --monitor)  MONITOR=1 ;;
         *) echo "unknown option: $a" >&2; exit 1 ;;
     esac
 done
@@ -59,6 +61,12 @@ args=(
         -drive if=pflash,format=raw,file="$NVRAM"
     )
 }
+
+# QEMU's monitor on a socket, so the VM can be driven and screenshotted from
+# outside while somebody watches the window. "sendkey" reaches the guest below
+# the host compositor, so it works without the passthrough submap, and
+# "screendump" captures the framebuffer without needing the guest's help.
+[[ $MONITOR -eq 0 ]] || args+=(-monitor "unix:$VMDIR/monitor.sock,server,nowait")
 
 [[ -f "$VMDIR/test-disk.qcow2" ]] || qemu-img create -f qcow2 "$VMDIR/test-disk.qcow2" 20G
 

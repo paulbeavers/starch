@@ -89,7 +89,7 @@ if [[ $CHECK_ONLY -eq 1 ]]; then
     echo "    base profile : $RELENG"
     echo "    work dir     : $WORK"
     echo "    output       : $OUT/${ISO_NAME}-*.iso"
-    echo "    live user    : $LIVE_USER (autologin, straight into Hyprland)"
+    echo "    live user    : $LIVE_USER (autologin, straight into the installer)"
     echo "    label        : $ISO_LABEL"
     printf '\n    Build with:  sudo %s\n\n' "$0"
     exit 0

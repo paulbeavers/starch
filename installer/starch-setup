@@ -235,6 +235,23 @@ run_archinstall() {
         say "    $TARGET is left mounted so you can look around."
         return 1
     fi
+
+    # Exit status 0 is not evidence that anything was installed: archinstall
+    # returns 0 after doing nothing when it does not like the configuration.
+    # Check for a system that actually exists before claiming success.
+    local missing=()
+    for f in /etc/passwd /etc/fstab /usr/bin/pacman /usr/lib/systemd/systemd; do
+        [[ -e "$TARGET$f" ]] || missing+=("$f")
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        err "archinstall exited successfully but did not install a system"
+        say "    missing from $TARGET: ${missing[*]}"
+        say
+        say "    Its own log usually says why:"
+        say "      tail -40 /var/log/archinstall/install.log"
+        say "    The configuration it was given is at $WORK/config.json."
+        return 1
+    fi
     ok "base system installed"
 }
 

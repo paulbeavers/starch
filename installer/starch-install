@@ -221,7 +221,10 @@ EOF
     read -rp "  Choice [1-4]: " choice
     case "$choice" in
         1) do_install; say; read -rp "Press Enter to return to the menu... " _ ;;
-        2) say; say "Type 'exit' to come back to the menu."; bash -l ;;
+        2) say; say "Type 'exit' to come back to the menu."
+           # STARCH_SHELL stops ~/.bash_profile exec'ing the installer again,
+           # which would drop straight back to this menu.
+           STARCH_SHELL=1 bash -l ;;
         3) reboot ;;
         4) poweroff ;;
         *) ;;

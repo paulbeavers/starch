@@ -182,7 +182,11 @@ install -d "$AIR/home/${LIVE_USER}"
 cat > "$AIR/home/${LIVE_USER}/.bash_profile" <<'EOF'
 # Install media: tty1 goes straight to the installer. Any other VT is a plain
 # shell, which matters when the installer is the thing that is broken.
-if [[ $XDG_VTNR == 1 ]]; then
+#
+# STARCH_SHELL guards against re-entry. The installer's Shell option runs a
+# login shell, which reads this file — without the guard it execs straight back
+# into the installer and the menu appears to ignore the choice.
+if [[ $XDG_VTNR == 1 && -z ${STARCH_SHELL:-} ]]; then
     exec starch-install
 fi
 EOF

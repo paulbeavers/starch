@@ -31,6 +31,58 @@ die()  { err "$*"; exit 1; }
 
 [[ $EUID -eq 0 ]] || exec sudo "$0" "$@"
 
+VERBOSE=0
+for a in "$@"; do
+    case "$a" in
+        -v|--verbose) VERBOSE=1 ;;
+        *) die "unknown option: $a (try --verbose)" ;;
+    esac
+done
+
+# spin() hides the cursor. Put it back on any exit, including Ctrl-C, or the
+# terminal is left without one.
+trap 'printf "\e[?25h"' EXIT
+
+# Run something slow with its output in a log instead of on the screen, showing
+# one line that says it is still going. The output is kept, not discarded — it
+# is what show_logs prints if the thing fails.
+#
+# stdin is /dev/null because nothing here is meant to ask questions. If one of
+# these ever does, it gets EOF and fails, rather than waiting for an answer
+# nobody can see it asking for.
+#
+# The frames are ASCII deliberately: this runs on the Linux console, where the
+# font is whatever the kernel loaded, and the usual braille spinners come out
+# as blanks or boxes.
+spin() {
+    local label="$1" log="$2"; shift 2
+
+    if [[ $VERBOSE -eq 1 || ! -t 1 ]]; then
+        say "    $label..."
+        "$@" </dev/null 2>&1 | tee "$log"
+        return "${PIPESTATUS[0]}"
+    fi
+
+    "$@" >"$log" 2>&1 </dev/null &
+    local pid=$! i=0 rc=0 start=$SECONDS elapsed
+    local -a frames=('|' '/' '-' $'\x5c')
+
+    printf '\e[?25l'
+    while kill -0 "$pid" 2>/dev/null; do
+        elapsed=$(( SECONDS - start ))
+        printf '\r    %s%s%s %s  %s%dm%02ds%s' \
+            "$C_B" "${frames[i++ % 4]}" "$C_0" "$label" \
+            "$C_D" $(( elapsed / 60 )) $(( elapsed % 60 )) "$C_0"
+        sleep 0.2
+    done
+    wait "$pid"; rc=$?
+    elapsed=$(( SECONDS - start ))
+    printf '\r\e[2K\e[?25h'
+
+    [[ $rc -eq 0 ]] && ok "$label  ${C_D}($(( elapsed / 60 ))m$(( elapsed % 60 ))s)${C_0}"
+    return $rc
+}
+
 # ── questions ─────────────────────────────────────────────────────────────────
 ask_disk() {
     step "Which disk should Arch be installed on?"
@@ -256,24 +308,25 @@ PY
 # front of whoever is standing at the machine rather than describing where to
 # look for it.
 show_logs() {
-    local out="$1"
+    local out="$1" extra="${2:-}"
     if [[ -s $out ]]; then
         say
-        say "    ${C_D}--- what archinstall printed ---${C_0}"
+        say "    ${C_D}--- last 25 lines of $out ---${C_0}"
         tail -25 "$out" | sed 's/^/      /'
     fi
-    if [[ -s /var/log/archinstall/install.log ]]; then
+    if [[ -n $extra && -s $extra ]]; then
         say
-        say "    ${C_D}--- end of /var/log/archinstall/install.log ---${C_0}"
-        tail -25 /var/log/archinstall/install.log | sed 's/^/      /'
+        say "    ${C_D}--- last 25 lines of $extra ---${C_0}"
+        tail -25 "$extra" | sed 's/^/      /'
     fi
     say
+    say "    Full output: $out"
     say "    The configuration it was given is at $WORK/config.json."
 }
 
 run_archinstall() {
     step "Installing Arch"
-    say "    archinstall is doing the base install. This takes a few minutes."
+    say "    ${C_D}Detail goes to $WORK/archinstall.out — Alt+F2 for a shell to watch it.${C_0}"
     say
     # --skip-wifi-check: this runs unattended, and archinstall's wifi prompt is
     # interactive. Without it a connectivity hiccup turns into a TUI nobody is
@@ -282,11 +335,12 @@ run_archinstall() {
     # The output is kept because archinstall declines a configuration in a
     # single line and then exits successfully; that line is the only evidence.
     local out="$WORK/archinstall.out"
-    if ! archinstall --config "$WORK/config.json" --creds "$WORK/creds.json" \
-                     --silent --skip-wifi-check 2>&1 | tee "$out"; then
+    if ! spin "Installing the base system" "$out" \
+              archinstall --config "$WORK/config.json" --creds "$WORK/creds.json" \
+                          --silent --skip-wifi-check; then
         err "archinstall failed"
         say "    $TARGET is left mounted so you can look around."
-        show_logs "$out"
+        show_logs "$out" /var/log/archinstall/install.log
         return 1
     fi
 
@@ -300,7 +354,7 @@ run_archinstall() {
     if [[ ${#missing[@]} -gt 0 ]]; then
         err "archinstall exited successfully but did not install a system"
         say "    missing from $TARGET: ${missing[*]}"
-        show_logs "$out"
+        show_logs "$out" /var/log/archinstall/install.log
         return 1
     fi
     ok "base system installed"
@@ -318,14 +372,17 @@ install_desktop() {
     cp /etc/resolv.conf "$TARGET/etc/resolv.conf" 2>/dev/null || true
     ok "setup copied to $home/hyprland-setup"
 
+    local out="$WORK/desktop.out"
+    say "    ${C_D}This is the long one — it downloads and installs the desktop.${C_0}"
     say
     # Invoked through bash rather than executed: mkarchiso copies the ISO
     # payload with --no-preserve=mode, so install.sh arrives here without its
     # execute bit and chroot answers with a bare "Permission denied".
-    if arch-chroot "$TARGET" bash "$home/hyprland-setup/install.sh" --for-user "$USERNAME"; then
-        ok "desktop installed"
-    else
+    if ! spin "Installing the desktop" "$out" \
+              arch-chroot "$TARGET" bash "$home/hyprland-setup/install.sh" \
+                          --for-user "$USERNAME"; then
         err "the desktop install failed"
+        show_logs "$out"
         say "    Arch itself is installed and bootable. To retry:"
         say "      arch-chroot $TARGET bash $home/hyprland-setup/install.sh --for-user $USERNAME"
         return 1

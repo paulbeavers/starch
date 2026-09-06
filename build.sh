@@ -116,7 +116,7 @@ ok "copied stock releng profile"
 printf '%s\n' \
     archinstall arch-install-scripts \
     parted gptfdisk dosfstools e2fsprogs btrfs-progs exfatprogs ntfs-3g \
-    git jq \
+    git jq dialog \
     >> "$PROFILE/packages.x86_64"
 LC_ALL=C sort -u -o "$PROFILE/packages.x86_64" "$PROFILE/packages.x86_64"
 ok "installer package list ($(wc -l < "$PROFILE/packages.x86_64") total)"

@@ -83,76 +83,226 @@ spin() {
     return $rc
 }
 
-# ── questions ─────────────────────────────────────────────────────────────────
-ask_disk() {
-    step "Which disk should Arch be installed on?"
-    say  "    ${C_R}Everything on the disk you pick will be erased.${C_0}"
-    say
-    local -a devs=()
-    # zram reports TYPE=disk, so filtering on type alone offers compressed RAM
-    # swap as an install target. Exclude it by name along with the other
-    # pseudo-devices, and drop read-only ones (the install medium itself).
-    #
-    # lsblk escapes spaces in MODEL as \x20, so "Samsung SSD 870" arrives as
-    # "Samsung\x20SSD\x20870". Decode it or the menu is unreadable.
-    # TYPE comes first so MODEL can be last: read gives the final variable
-    # everything remaining, and a model name contains spaces.
+# ── the wizard ────────────────────────────────────────────────────────────────
+# dialog draws every screen, so the questions are steps in a state machine
+# rather than a run of reads: each one returns "go forward", "go back" or
+# "quit", and the loop at the bottom walks the list. Answers live in variables,
+# not in the control flow, which is what makes Back possible at all — a step
+# reached a second time offers what was typed the first time.
+#
+# dialog reports the pressed button in its exit status and the typed value on
+# stderr, hence the fd shuffle in ask(): the widget draws on the terminal while
+# its answer is captured.
+BACK=3          # --extra-button
+declare -A ANS  # every answer, keyed by step
+
+DTITLE="starch installer"
+DBACK="starch  —  Arch Linux + Hyprland"
+# --no-collapse: dialog squeezes runs of spaces into one by default, which
+# turns the aligned columns on the summary and the lsblk table on the erase
+# warning into a single run-on line.
+dlg() { dialog --backtitle "$DBACK" --title "$DTITLE" --no-collapse "$@"; }
+
+# Capture a value: UI to the terminal, answer to the caller.
+ask() { dlg "$@" 3>&1 1>&2 2>&3 3>&-; }
+
+oops() { dlg --title "Try again" --msgbox "$1" 8 60; }
+
+# Quit needs confirming — it is one keystroke away on every screen, and by the
+# later steps a password has already been typed twice.
+confirm_quit() {
+    dlg --yes-label Quit --no-label "Keep going" \
+        --yesno "Leave the installer?\n\nNothing has been written to any disk." 9 55
+}
+
+step_welcome() {
+    dlg --yes-label Next --no-label Quit --yesno \
+"This installs Arch Linux with the Hyprland desktop.
+
+You will be asked six things, and then it runs on its own.
+
+Nothing is written to any disk until you confirm a summary
+of your answers at the end." 14 66
+}
+
+step_disk() {
+    local -a items=() devs=()
     while read -r _type name bytes ro model; do
         [[ $ro == 1 ]] && continue
         [[ ${bytes:-x} =~ ^[0-9]+$ ]] || continue
-        # Too small to install onto: an emulated floppy (/dev/fd0, which QEMU
-        # always presents), an empty card reader slot. Skipping them is not
-        # only tidiness — every one of them takes a number in the list, so the
-        # disk someone means to choose is not the number they reach for.
         [[ $bytes -lt $((4 * 1024 * 1024 * 1024)) ]] && continue
         model="${model//\\x20/ }"
         devs+=("$name")
-        printf '      %-2s %-12s %-8s %s\n' "${#devs[@]})" "$name" \
-               "$(numfmt --to=iec "$bytes")" "${model:-—}"
+        items+=("$name" "$(numfmt --to=iec "$bytes")  ${model:-—}")
     done < <(lsblk -b -dpnro TYPE,NAME,SIZE,RO,MODEL |
              awk '$1=="disk"' |
              grep -vE " /dev/(loop|sr|ram|zram|md|dm-|fd)")
-    [[ ${#devs[@]} -gt 0 ]] || die "no usable disks found"
-    say
-    local n
-    read -rp "    Disk [1-${#devs[@]}]: " n
-    DISK="${devs[$((n-1))]:-}"
-    [[ -b ${DISK:-} ]] || die "not a disk: ${DISK:-<none>}"
 
-    say
-    say "    ${C_Y}$DISK currently contains:${C_0}"
-    lsblk -pno NAME,SIZE,FSTYPE,LABEL "$DISK" | sed 's/^/      /'
-    say
-    local confirm
-    read -rp "    Type ERASE to wipe $DISK: " confirm
-    [[ $confirm == ERASE ]] || die "not confirmed"
+    if [[ ${#devs[@]} -eq 0 ]]; then
+        dlg --msgbox "No disk big enough to install onto was found.\n\nstarch needs at least 4 GiB." 9 60
+        return 2
+    fi
+
+    local sel
+    sel=$(ask --default-item "${ANS[disk]:-}" \
+              --ok-label Next --extra-button --extra-label Back --cancel-label Quit \
+              --menu "Which disk should Arch be installed on?" \
+              $(( ${#devs[@]} + 8 )) 70 "${#devs[@]}" "${items[@]}")
+    local rc=$?
+    [[ $rc -eq 0 ]] || return $rc
+    ANS[disk]="$sel"
 }
 
-ask_rest() {
-    step "A few more things"
-    read -rp "    Hostname [starch]: " HOSTNAME_; HOSTNAME_="${HOSTNAME_:-starch}"
+step_erase() {
+    local disk="${ANS[disk]}" contents rows
+    contents="$(lsblk -pno NAME,SIZE,FSTYPE,LABEL "$disk" 2>/dev/null)"
+    # The table is a different number of lines on every machine, and dialog's
+    # auto-height (0) mis-sizes a box with a block of pre-formatted text in it.
+    # Count the lines instead: 11 is the surrounding prose, borders and
+    # buttons. Too small and dialog makes the text scrollable and puts a
+    # percentage in the border, which looks like a progress bar.
+    rows=$(( 11 + $(grep -c '' <<<"$contents") ))
 
-    while :; do
-        read -rp "    Your username: " USERNAME
-        [[ $USERNAME =~ ^[a-z_][a-z0-9_-]*$ ]] && break
-        warn "lowercase letters, digits, - and _ only"
+    dlg --default-button extra --yes-label "Erase it" --extra-button --extra-label Back \
+        --no-label Quit --yesno \
+"Everything on $disk will be erased.
+
+It currently contains:
+
+$contents
+
+This is the only warning you get." "$rows" 74
+}
+
+step_hostname() {
+    local v
+    v=$(ask --ok-label Next --extra-button --extra-label Back --cancel-label Quit \
+            --inputbox "A name for this machine on the network." 9 60 \
+            "${ANS[hostname]:-starch}")
+    local rc=$?
+    [[ $rc -eq 0 ]] || return $rc
+    v="${v:-starch}"
+    ANS[hostname]="$v"
+    if [[ ! $v =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ ]]; then
+        oops "Hostnames may contain letters, digits and hyphens, and cannot start with a hyphen."
+        return 4
+    fi
+    ANS[hostname]="$v"
+}
+
+step_username() {
+    local v
+    v=$(ask --ok-label Next --extra-button --extra-label Back --cancel-label Quit \
+            --inputbox "The account you will log in as.\n\nAdministrator rights are granted through sudo." 11 60 \
+            "${ANS[username]:-}")
+    local rc=$?
+    [[ $rc -eq 0 ]] || return $rc
+    ANS[username]="$v"
+    if [[ ! $v =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+        oops "Usernames must start with a lowercase letter or underscore, and may contain lowercase letters, digits, - and _."
+        return 4
+    fi
+    ANS[username]="$v"
+}
+
+step_password() {
+    local p1 p2 rc
+    p1=$(ask --insecure --ok-label Next --extra-button --extra-label Back \
+             --cancel-label Quit \
+             --passwordbox "Password for ${ANS[username]}." 9 60)
+    rc=$?; [[ $rc -eq 0 ]] || return $rc
+    if [[ -z $p1 ]]; then
+        oops "The password cannot be empty."
+        return 4
+    fi
+    p2=$(ask --insecure --ok-label Next --extra-button --extra-label Back \
+             --cancel-label Quit --passwordbox "Type it again." 9 60)
+    rc=$?; [[ $rc -eq 0 ]] || return $rc
+    if [[ $p1 != "$p2" ]]; then
+        oops "Those do not match."
+        return 4
+    fi
+    ANS[password]="$p1"
+}
+
+step_timezone() {
+    local v
+    v=$(ask --ok-label Next --extra-button --extra-label Back --cancel-label Quit \
+            --inputbox "Timezone, as Region/City.\n\nFor example: Europe/London, America/Chicago, UTC." 11 60 \
+            "${ANS[timezone]:-UTC}")
+    local rc=$?
+    [[ $rc -eq 0 ]] || return $rc
+    v="${v:-UTC}"
+    ANS[timezone]="$v"
+    if [[ ! -f /usr/share/zoneinfo/$v ]]; then
+        oops "There is no timezone called '$v'.\n\nThe full list is in /usr/share/zoneinfo."
+        return 4
+    fi
+    ANS[timezone]="$v"
+}
+
+step_filesystem() {
+    local v on_ext4=on on_btrfs=off
+    [[ ${ANS[fstype]:-ext4} == btrfs ]] && { on_ext4=off; on_btrfs=on; }
+    v=$(ask --ok-label Next --extra-button --extra-label Back --cancel-label Quit \
+            --radiolist "Filesystem for the root partition." 10 66 2 \
+            ext4  "Plain and predictable"                     "$on_ext4" \
+            btrfs "Subvolumes and snapshots, in an @ subvol"  "$on_btrfs")
+    local rc=$?
+    [[ $rc -eq 0 ]] || return $rc
+    ANS[fstype]="${v:-ext4}"
+}
+
+step_keyboard() {
+    local v
+    v=$(ask --ok-label Next --extra-button --extra-label Back --cancel-label Quit \
+            --inputbox "Keyboard layout.\n\nFor example: us, uk, de, fr." 10 60 \
+            "${ANS[kblayout]:-us}")
+    local rc=$?
+    [[ $rc -eq 0 ]] || return $rc
+    ANS[kblayout]="${v:-us}"
+}
+
+step_summary() {
+    dlg --default-button extra --yes-label "Install now" --extra-button --extra-label Back \
+        --no-label Quit --yesno \
+"$(printf '  %-12s %s\n' \
+    Disk     "${ANS[disk]}  (${ANS[fstype]}, will be erased)" \
+    Hostname "${ANS[hostname]}" \
+    User     "${ANS[username]}" \
+    Timezone "${ANS[timezone]}" \
+    Keyboard "${ANS[kblayout]}")
+
+Choosing \"Install now\" erases ${ANS[disk]} and begins.
+Everything after this point runs without asking anything." 13 74
+}
+
+# The wizard proper. A step returns 0 to advance, $BACK to go back, 4 to be
+# shown again (a validation message has just been dismissed), and anything else
+# means Quit was pressed.
+run_wizard() {
+    local -a steps=(
+        step_welcome step_disk step_erase step_hostname step_username
+        step_password step_timezone step_filesystem step_keyboard step_summary
+    )
+    local i=0 rc
+    while [[ $i -lt ${#steps[@]} ]]; do
+        "${steps[i]}"; rc=$?
+        case $rc in
+            0)      i=$(( i + 1 )) ;;
+            4)      ;;                                  # redo this step
+            "$BACK") [[ $i -gt 0 ]] && i=$(( i - 1 )) ;;
+            *)      confirm_quit && return 1 ;;         # Quit, or Esc
+        esac
     done
 
-    local p1 p2
-    while :; do
-        read -rsp "    Password for $USERNAME: " p1; say
-        read -rsp "    Repeat it: " p2; say
-        [[ -n $p1 && $p1 == "$p2" ]] && { PASSWORD="$p1"; break; }
-        warn "empty or does not match"
-    done
-
-    read -rp "    Timezone [UTC]: " TIMEZONE; TIMEZONE="${TIMEZONE:-UTC}"
-    [[ -f /usr/share/zoneinfo/$TIMEZONE ]] || { warn "unknown timezone, using UTC"; TIMEZONE=UTC; }
-
-    read -rp "    Filesystem — 1) ext4  2) btrfs  [1]: " fs
-    case "${fs:-1}" in 2) FSTYPE=btrfs ;; *) FSTYPE=ext4 ;; esac
-
-    read -rp "    Keyboard layout [us]: " KBLAYOUT; KBLAYOUT="${KBLAYOUT:-us}"
+    DISK="${ANS[disk]}"
+    HOSTNAME_="${ANS[hostname]}"
+    USERNAME="${ANS[username]}"
+    PASSWORD="${ANS[password]}"
+    TIMEZONE="${ANS[timezone]}"
+    FSTYPE="${ANS[fstype]}"
+    KBLAYOUT="${ANS[kblayout]}"
 }
 
 # ── partition ─────────────────────────────────────────────────────────────────
@@ -390,32 +540,14 @@ install_desktop() {
 }
 
 # ── main ──────────────────────────────────────────────────────────────────────
+command -v dialog >/dev/null || die "dialog is not installed; this needs it to draw the installer."
+
+# dialog leaves its last widget on the screen, so clear once the wizard is done
+# and let everything after it scroll normally. Not on EXIT: the final thing on
+# screen is either the summary or a failure with its log tail, and clearing
+# would take both with it.
+run_wizard || { clear; say "Nothing was changed."; exit 0; }
 clear
-cat <<'EOF'
-
-      _             _
-  ___| |_ __ _ _ __| |__
- / __| __/ _` | '__| '_ \
- \__ \ || (_| | |  | | | |
- |___/\__\__,_|_|  |_| |_|
-
- A guided install of Arch Linux with the Hyprland desktop.
- Six questions, then it runs on its own.
-
-EOF
-read -rp "  Continue? [y/N] " a; [[ ${a,,} == y ]] || exit 0
-
-ask_disk
-ask_rest
-
-step "Ready"
-say "    disk       $DISK  (${FSTYPE}, will be erased)"
-say "    hostname   $HOSTNAME_"
-say "    user       $USERNAME"
-say "    timezone   $TIMEZONE"
-say "    keyboard   $KBLAYOUT"
-say
-read -rp "    Start the install? [y/N] " a; [[ ${a,,} == y ]] || exit 0
 
 # Nothing before this line touches the disk.
 prepare_config   || exit 1

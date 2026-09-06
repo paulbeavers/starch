@@ -100,11 +100,6 @@ rm -f /etc/systemd/network/*.network
 # ConditionVirtualization-gated, so on real hardware they do nothing, and in a
 # VM they are what the user would have had to install by hand.
 
-say "removing packages that only the installer needed"
-# --nosave so their configuration goes too. Failure here is not fatal: an
-# installed system with an extra package is a blemish, a failed install is not.
-pacman -Rns --noconfirm calamares cage qt6-wayland archinstall dialog 2>/dev/null || true
-
 say "restoring a normal boot"
 systemctl set-default graphical.target 2>/dev/null || true
 

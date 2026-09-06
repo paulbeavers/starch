@@ -34,10 +34,30 @@ echo "  configuring the desktop for $USER_NAME"
 bash "$REPO/install.sh" --for-user "$USER_NAME"
 rc=$?
 
+# The installer's own packages, now that nothing else needs them. This happens
+# here rather than in strip-live for two reasons: strip-live runs before the
+# desktop is configured, and the removal has to come after.
+#
+# -Rn, not -Rns. The cascade took 31 packages the first time it ran — it
+# followed dependencies out of the installer and into things the desktop
+# actually uses, and the install then stopped saying one package was missing.
+# Remove exactly what was named, then let pacman identify true orphans: -Qtd
+# lists only packages installed as dependencies that nothing now requires, so
+# it cannot reach anything the desktop asked for by name.
+if [[ $rc -eq 0 ]]; then
+    echo "  removing the installer"
+    pacman -Rn --noconfirm calamares cage qt6-wayland archinstall dialog \
+        >/dev/null 2>&1 || true
+    orphans="$(pacman -Qtdq 2>/dev/null)"
+    if [[ -n $orphans ]]; then
+        # shellcheck disable=SC2086
+        pacman -Rns --noconfirm $orphans >/dev/null 2>&1 || true
+    fi
+fi
+
 # Last one out. strip-live cannot remove these, because this script is one of
-# them and runs after it — so the clean-up lands here instead. Unlinking a
-# running script is safe: the shell holds the file open and the inode outlives
-# the directory entry.
+# them and runs after it. Unlinking a running script is safe: the shell holds
+# the file open and the inode outlives the directory entry.
 rm -rf /usr/local/lib/starch
 
 exit $rc

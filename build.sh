@@ -209,14 +209,20 @@ cat > "$AIR/home/${LIVE_USER}/.bash_profile" <<'EOF'
 # Install media: tty1 goes straight to the installer. Any other VT is a plain
 # shell, which matters when the installer is the thing that is broken.
 #
+# The wizard comes up first, because installing is what nearly everyone booted
+# this to do, and a menu whose first entry is the only one most people want is
+# a keystroke asking to be skipped. Quitting it falls through to the menu,
+# which still has the advanced install, a shell, the boot log and reboot.
+#
 # STARCH_SHELL guards against re-entry. The installer's Shell option runs a
 # login shell, which reads this file — without the guard it execs straight back
 # into the installer and the menu appears to ignore the choice.
 if [[ $XDG_VTNR == 1 && -z ${STARCH_SHELL:-} ]]; then
+    starch-setup
     exec starch-install
 fi
 EOF
-ok "tty1 launches the installer"
+ok "tty1 opens the install wizard, menu behind it"
 
 # ── the installer ─────────────────────────────────────────────────────────────
 install -d "$AIR/usr/local/bin"

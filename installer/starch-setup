@@ -122,7 +122,10 @@ step_welcome() {
 You will be asked six things, and then it runs on its own.
 
 Nothing is written to any disk until you confirm a summary
-of your answers at the end." 14 66
+of your answers at the end.
+
+Quit leads to a menu with archinstall's own installer, a
+shell, and this boot's log." 15 66
 }
 
 step_disk() {

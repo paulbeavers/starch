@@ -33,9 +33,20 @@ args=(
 )
 [[ $MODE == uefi ]] && {
     OVMF=/usr/share/edk2/x64/OVMF_CODE.4m.fd
-    [[ -f $OVMF ]] || OVMF=/usr/share/OVMF/OVMF_CODE.fd
+    VARS=/usr/share/edk2/x64/OVMF_VARS.4m.fd
+    [[ -f $OVMF ]] || { OVMF=/usr/share/OVMF/OVMF_CODE.fd; VARS=/usr/share/OVMF/OVMF_VARS.fd; }
     [[ -f $OVMF ]] || { echo "OVMF firmware not found: sudo pacman -S edk2-ovmf" >&2; exit 1; }
-    args+=(-drive if=pflash,format=raw,readonly=on,file="$OVMF")
+
+    # OVMF is split in two: read-only code, and a writable variable store. With
+    # only the code half the firmware has nowhere to record a boot entry, so an
+    # installed system leaves no trace in NVRAM and the VM will not boot it on
+    # the next run. Give each test VM its own writable copy of the vars.
+    NVRAM="$HERE/out/OVMF_VARS.fd"
+    [[ -f $NVRAM ]] || cp "$VARS" "$NVRAM"
+    args+=(
+        -drive if=pflash,format=raw,readonly=on,file="$OVMF"
+        -drive if=pflash,format=raw,file="$NVRAM"
+    )
 }
 
 [[ -f "$HERE/out/test-disk.qcow2" ]] || qemu-img create -f qcow2 "$HERE/out/test-disk.qcow2" 20G

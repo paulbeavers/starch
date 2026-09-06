@@ -174,6 +174,25 @@ prepare_config() {
     [[ -d $REPO_SRC ]] || die "the setup is missing from $REPO_SRC"
     ok "setup found at $REPO_SRC"
 
+    # A missing network is not a visible failure further down. archinstall
+    # answers a failed connectivity check by opening its wifi prompt, and with
+    # no wifi device it returns 0 having installed nothing — which looks like a
+    # successful install until the machine will not boot. Check it here, while
+    # the disk is still intact.
+    local waited=0
+    until timeout 4 bash -c 'exec 3<>/dev/tcp/archlinux.org/443' 2>/dev/null; do
+        waited=$((waited + 5))
+        if [[ $waited -ge 40 ]]; then
+            err "no network"
+            say "    The install downloads packages, so it cannot run offline."
+            say "    Plug in a cable, or connect wifi with:  iwctl"
+            say "    Then start again. Nothing has been written to the disk."
+            exit 1
+        fi
+        sleep 1
+    done
+    ok "network is up"
+
     mkdir -p "$WORK"
 
     local hash
@@ -226,13 +245,41 @@ PY
     ok "config.json and creds.json written and parse cleanly"
 }
 
+# archinstall can fail without saying much on screen, so put the evidence in
+# front of whoever is standing at the machine rather than describing where to
+# look for it.
+show_logs() {
+    local out="$1"
+    if [[ -s $out ]]; then
+        say
+        say "    ${C_D}--- what archinstall printed ---${C_0}"
+        tail -25 "$out" | sed 's/^/      /'
+    fi
+    if [[ -s /var/log/archinstall/install.log ]]; then
+        say
+        say "    ${C_D}--- end of /var/log/archinstall/install.log ---${C_0}"
+        tail -25 /var/log/archinstall/install.log | sed 's/^/      /'
+    fi
+    say
+    say "    The configuration it was given is at $WORK/config.json."
+}
+
 run_archinstall() {
     step "Installing Arch"
     say "    archinstall is doing the base install. This takes a few minutes."
     say
-    if ! archinstall --config "$WORK/config.json" --creds "$WORK/creds.json" --silent; then
+    # --skip-wifi-check: this runs unattended, and archinstall's wifi prompt is
+    # interactive. Without it a connectivity hiccup turns into a TUI nobody is
+    # there to answer.
+    #
+    # The output is kept because archinstall declines a configuration in a
+    # single line and then exits successfully; that line is the only evidence.
+    local out="$WORK/archinstall.out"
+    if ! archinstall --config "$WORK/config.json" --creds "$WORK/creds.json" \
+                     --silent --skip-wifi-check 2>&1 | tee "$out"; then
         err "archinstall failed"
         say "    $TARGET is left mounted so you can look around."
+        show_logs "$out"
         return 1
     fi
 
@@ -246,10 +293,7 @@ run_archinstall() {
     if [[ ${#missing[@]} -gt 0 ]]; then
         err "archinstall exited successfully but did not install a system"
         say "    missing from $TARGET: ${missing[*]}"
-        say
-        say "    Its own log usually says why:"
-        say "      tail -40 /var/log/archinstall/install.log"
-        say "    The configuration it was given is at $WORK/config.json."
+        show_logs "$out"
         return 1
     fi
     ok "base system installed"

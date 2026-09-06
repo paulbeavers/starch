@@ -1,0 +1,5 @@
+# Build trees and output. mkarchiso's work dir is several GB and the ISO is
+# well over a gigabyte; neither belongs in the repository.
+/work/
+/work-assemble/
+/out/

@@ -151,25 +151,50 @@ size_kb=$(du -sk "$DEST" | cut -f1)
 ok "embedded the repo at /usr/local/share/hyprland-setup (${size_kb}KB)"
 
 # ── live user with the desktop config already in place ────────────────────────
-# archiso's airootfs/etc/{passwd,shadow,group} are plain files; append rather
-# than rewrite so releng's own entries survive.
-install -d "$AIR/etc"
-for f in passwd shadow group; do
-    [[ -f "$RELENG/airootfs/etc/$f" ]] && cp "$RELENG/airootfs/etc/$f" "$AIR/etc/$f"
-done
-grep -q "^${LIVE_USER}:" "$AIR/etc/passwd" 2>/dev/null || \
-    echo "${LIVE_USER}:x:1000:1000::/home/${LIVE_USER}:/bin/bash" >> "$AIR/etc/passwd"
-grep -q "^${LIVE_USER}:" "$AIR/etc/group" 2>/dev/null || {
-    echo "${LIVE_USER}:x:1000:" >> "$AIR/etc/group"
-    sed -i "s/^wheel:x:998:.*/wheel:x:998:${LIVE_USER}/" "$AIR/etc/group" 2>/dev/null || true
-}
-# No password on live media; sudo is passwordless for the same reason.
-grep -q "^${LIVE_USER}:" "$AIR/etc/shadow" 2>/dev/null || \
-    echo "${LIVE_USER}::14871::::::" >> "$AIR/etc/shadow"
+# The live user is declared to systemd-sysusers rather than written straight
+# into /etc/{passwd,group,shadow}.
+#
+# Those three are backup files of the "filesystem" package. The profile's
+# airootfs is copied into place *before* pacstrap runs, so anything written
+# here is what the package hooks find when they run. Releng ships a one-line
+# passwd (it only changes root's shell) and no group file at all. Writing a
+# group file containing just the live user replaced the real group database
+# while /etc/gshadow stayed as the package shipped it, and the two then
+# disagreed: the pacstrap sysusers hook died on "/etc/gshadow: Group root
+# already exists" and stopped before creating any system user.
+#
+# The cost of that was not obvious. With no "systemd-network" user,
+# systemd-networkd fails at 217/USER and never brings up a link, so the live
+# ISO has no network — and archinstall answers a failed connectivity check by
+# opening its wifi prompt, finding no wifi device, and returning 0 without
+# installing anything. A silent, successful-looking install of nothing.
+#
+# A sysusers drop-in cooperates with the package files instead of replacing
+# them. zz- so it sorts last: wheel has to exist (basic.conf, GID 998) before
+# anyone can be added to it.
+install -d "$AIR/etc/sysusers.d"
+cat > "$AIR/etc/sysusers.d/zz-live.conf" <<EOF
+g ${LIVE_USER} 1000
+u ${LIVE_USER} 1000:${LIVE_USER} "starch live user" /home/${LIVE_USER} /bin/bash
+m ${LIVE_USER} wheel
+EOF
+# sysusers locks the account, which autologin does not care about: agetty
+# --autologin does not authenticate. Everything that needs privilege goes
+# through sudo, which is passwordless here for the same reason.
 install -d -m 750 "$AIR/etc/sudoers.d"
 echo "${LIVE_USER} ALL=(ALL) NOPASSWD: ALL" > "$AIR/etc/sudoers.d/00-live"
 chmod 440 "$AIR/etc/sudoers.d/00-live"
-ok "live user '${LIVE_USER}' (no password, passwordless sudo)"
+ok "live user '${LIVE_USER}' declared to sysusers (passwordless sudo)"
+
+# The overlay must not carry a user or group database of its own. Replacing one
+# of these disables every system user on the ISO and says nothing about it, so
+# fail the build here rather than ship it.
+for f in passwd group shadow gshadow; do
+    [[ -e "$AIR/etc/$f" ]] || continue
+    cmp -s "$AIR/etc/$f" "$RELENG/airootfs/etc/$f" && continue
+    die "the profile ships its own /etc/$f — that breaks the pacstrap sysusers hook"
+done
+ok "user and group databases left to the packages"
 
 # ── autologin straight into Hyprland ──────────────────────────────────────────
 install -d "$AIR/etc/systemd/system/getty@tty1.service.d"

@@ -78,14 +78,18 @@ say "disabling services that were only enabled for the live image"
 #   pacman-init     populates the live keyring
 #   livecd-talk     the accessibility screen reader for the install medium
 #
-# "Enabled" is a symlink in a .wants directory, so removing the symlink is the
-# whole operation and it cannot fail halfway.
+# systemctl disable, not rm. Deleting the .wants symlink looks like it works
+# and does not: systemd-networkd also installs an Alias, and after removing
+# every .wants entry by hand the leftover
+# /etc/systemd/system/dbus-org.freedesktop.network1.service still had it
+# reporting "enabled". systemctl knows about Alias= and Also= and takes the
+# whole set. --no-reload because there is no manager listening in a chroot.
 for unit in sshd.service iwd.service systemd-networkd.service \
-            systemd-networkd-wait-online.service choose-mirror.service \
-            pacman-init.service livecd-talk.service livecd-alsa-unmuter.service; do
-    rm -f /etc/systemd/system/*.wants/"$unit"
+            systemd-networkd.socket systemd-networkd-wait-online.service \
+            choose-mirror.service pacman-init.service \
+            livecd-talk.service livecd-alsa-unmuter.service; do
+    systemctl disable --no-reload "$unit" >/dev/null 2>&1 || true
 done
-rm -f /etc/systemd/system/sockets.target.wants/systemd-networkd.socket
 rm -f /etc/systemd/network/*.network
 
 # systemd-resolved stays enabled on purpose: /etc/resolv.conf is a symlink to

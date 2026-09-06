@@ -209,9 +209,14 @@ ok "embedded the repo at /usr/local/share/hyprland-setup (${size_kb}KB)"
 # them. zz- so it sorts last: wheel has to exist (basic.conf, GID 998) before
 # anyone can be added to it.
 install -d "$AIR/etc/sysusers.d"
+# 1500, not 1000. The live user exists only on the medium, but it takes a UID
+# there, and the account the installer creates gets the next one free — the
+# first Calamares install made its user 1001, which is not what someone setting
+# up their own machine expects to see. Out of the way, and 1000 is left for
+# them.
 cat > "$AIR/etc/sysusers.d/zz-live.conf" <<EOF
-g ${LIVE_USER} 1000
-u ${LIVE_USER} 1000:${LIVE_USER} "starch live user" /home/${LIVE_USER} /bin/bash
+g ${LIVE_USER} 1500
+u ${LIVE_USER} 1500:${LIVE_USER} "starch live user" /home/${LIVE_USER} /bin/bash
 m ${LIVE_USER} wheel
 EOF
 # sysusers locks the account, which autologin does not care about: agetty
@@ -303,7 +308,7 @@ extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
   ["/usr/local/lib/starch/strip-live"]="0:0:755"
   ["/usr/local/lib/starch/configure-desktop"]="0:0:755"
   ["/usr/local/share/hyprland-setup/config/hypr/scripts/"]="0:0:755"
-  ["/home/{user}/"]="1000:1000:755"
+  ["/home/{user}/"]="1500:1500:755"
   ["/etc/sudoers.d/00-live"]="0:0:440"
 '''
 s = re.sub(r'(file_permissions=\(\n)', r'\1' + extra, s, count=1)

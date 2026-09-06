@@ -19,7 +19,12 @@ REPO=/usr/local/share/hyprland-setup
 # Calamares has just created exactly one ordinary account. Ask the passwd
 # database rather than trying to have the username handed down through
 # Calamares' configuration, which does not pass one to shellprocess.
-USER_NAME="$(awk -F: '$3 == 1000 { print $1; exit }' /etc/passwd)"
+#
+# Not "UID 1000": the live user holds a UID of its own on the medium, so the
+# account Calamares creates is not guaranteed to get 1000 — the first install
+# tested this way produced tester at 1001. Take the first ordinary account
+# instead, and skip the live user in case this ever runs before it is removed.
+USER_NAME="$(awk -F: '$3 >= 1000 && $3 < 65534 && $1 != "live" { print $1; exit }' /etc/passwd)"
 if [[ -z $USER_NAME ]]; then
     echo "  no user with UID 1000; skipping desktop configuration"
     exit 0

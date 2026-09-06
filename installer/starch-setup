@@ -37,11 +37,23 @@ ask_disk() {
     say  "    ${C_R}Everything on the disk you pick will be erased.${C_0}"
     say
     local -a devs=()
-    while read -r name size model; do
+    # zram reports TYPE=disk, so filtering on type alone offers compressed RAM
+    # swap as an install target. Exclude it by name along with the other
+    # pseudo-devices, and drop read-only ones (the install medium itself).
+    #
+    # lsblk escapes spaces in MODEL as \x20, so "Samsung SSD 870" arrives as
+    # "Samsung\x20SSD\x20870". Decode it or the menu is unreadable.
+    # TYPE comes first so MODEL can be last: read gives the final variable
+    # everything remaining, and a model name contains spaces.
+    while read -r _type name size ro model; do
+        [[ $ro == 1 ]] && continue
+        model="${model//\\x20/ }"
         devs+=("$name")
-        printf '      %-2s %-12s %-8s %s\n' "${#devs[@]})" "$name" "$size" "$model"
-    done < <(lsblk -dpnro NAME,SIZE,MODEL | grep -vE "^/dev/(loop|sr|ram)")
-    [[ ${#devs[@]} -gt 0 ]] || die "no disks found"
+        printf '      %-2s %-12s %-8s %s\n' "${#devs[@]})" "$name" "$size" "${model:-—}"
+    done < <(lsblk -dpnro TYPE,NAME,SIZE,RO,MODEL |
+             awk '$1=="disk"' |
+             grep -vE " /dev/(loop|sr|ram|zram|md|dm-)")
+    [[ ${#devs[@]} -gt 0 ]] || die "no usable disks found"
     say
     local n
     read -rp "    Disk [1-${#devs[@]}]: " n

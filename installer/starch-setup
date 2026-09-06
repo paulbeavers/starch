@@ -135,8 +135,25 @@ partition_disk() {
 }
 
 # ── archinstall ───────────────────────────────────────────────────────────────
-run_archinstall() {
-    step "Writing the archinstall configuration"
+# Everything that can fail while the disk is still intact happens here. The
+# order matters more than it looks: partitioning is irreversible, so a missing
+# tool or an unhashable password must stop the install before the wipe rather
+# than halfway through, leaving a machine with no OS and no installer state.
+prepare_config() {
+    step "Checking tools and preparing the configuration"
+
+    local missing=()
+    for t in sgdisk wipefs partprobe mkfs.fat openssl archinstall arch-chroot python3; do
+        command -v "$t" >/dev/null || missing+=("$t")
+    done
+    [[ $FSTYPE == btrfs ]] && { command -v mkfs.btrfs >/dev/null || missing+=(mkfs.btrfs); }
+    [[ $FSTYPE == ext4  ]] && { command -v mkfs.ext4  >/dev/null || missing+=(mkfs.ext4);  }
+    [[ ${#missing[@]} -eq 0 ]] || die "missing on this medium: ${missing[*]}"
+    ok "all required tools present"
+
+    [[ -d $REPO_SRC ]] || die "the setup is missing from $REPO_SRC"
+    ok "setup found at $REPO_SRC"
+
     mkdir -p "$WORK"
 
     local hash
@@ -184,8 +201,12 @@ json.dump(config, open(f"{work}/config.json", "w"), indent=2)
 json.dump(creds, open(f"{work}/creds.json", "w"), indent=2)
 PY
     chmod 600 "$WORK/creds.json"
-    ok "config.json and creds.json"
+    python3 -c "import json,sys; json.load(open('$WORK/config.json')); json.load(open('$WORK/creds.json'))" \
+        || die "generated configuration is not valid JSON"
+    ok "config.json and creds.json written and parse cleanly"
+}
 
+run_archinstall() {
     step "Installing Arch"
     say "    archinstall is doing the base install. This takes a few minutes."
     say
@@ -248,6 +269,8 @@ say "    keyboard   $KBLAYOUT"
 say
 read -rp "    Start the install? [y/N] " a; [[ ${a,,} == y ]] || exit 0
 
+# Nothing before this line touches the disk.
+prepare_config   || exit 1
 partition_disk   || exit 1
 run_archinstall  || exit 1
 install_desktop  || exit 1

@@ -77,7 +77,10 @@ find_target_root() {
         umount "$tmp" 2>/dev/null
     done < <(lsblk -pnro NAME,TYPE | awk '$2=="part"{print $1}')
     rmdir "$tmp" 2>/dev/null
-    printf '%s\n' "${found[@]}"
+    # An empty array still emits one blank line through printf, which the
+    # caller would read back as a single candidate named "".
+    [[ ${#found[@]} -gt 0 ]] && printf '%s\n' "${found[@]}"
+    return 0
 }
 
 # ── stage 2: put the desktop on the new system ────────────────────────────────
@@ -89,15 +92,18 @@ apply_desktop() {
     mkdir -p "$TARGET"
     mount "$root_dev" "$TARGET" || { err "could not mount $root_dev"; return 1; }
 
-    # The ESP has to be back for a bootloader update, and install.sh may touch
-    # it. fstab in the target knows where it goes.
+    # Bring up the rest of the target's filesystems — the ESP especially, since
+    # a bootloader or kernel update inside the chroot writes to it.
+    #
+    # Both -T and --target-prefix are required. Without -T, mount -a reads the
+    # live ISO's own fstab. Without --target-prefix, every mount point in the
+    # target's fstab is resolved against the running system, so "/boot" would
+    # mount the target's ESP over the live environment's /boot.
     if [[ -f $TARGET/etc/fstab ]]; then
-        mount -a --target-prefix "$TARGET" 2>/dev/null || \
-        awk '$2!="/" && $1!~/^#/ && $1!="" {print $2}' "$TARGET/etc/fstab" | while read -r mp; do
-            mount --fstab "$TARGET/etc/fstab" "$mp" 2>/dev/null || true
-        done
+        mount -a -T "$TARGET/etc/fstab" --target-prefix "$TARGET" 2>/dev/null || true
     fi
-    ok "mounted"
+    ok "mounted:"
+    findmnt -nR "$TARGET" -o TARGET,SOURCE | sed 's/^/      /'
 
     # The first non-system account is the one archinstall created.
     local user home

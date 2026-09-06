@@ -32,8 +32,8 @@ RELENG="${RELENG:-/usr/share/archiso/configs/releng}"
 WORK="${WORK:-$HERE/work}"
 PROFILE="$WORK/profile"
 OUT="${OUT:-$HERE/out}"
-# Where tools/build-calamares.sh leaves the one package that is not in the
-# official repositories.
+# Where tools/build-aur.sh leaves the packages that are not in the official
+# repositories.
 LOCALREPO="${LOCALREPO:-$HERE/localrepo}"
 LOCALDB=starch-local
 
@@ -139,9 +139,20 @@ LC_ALL=C sort -u -o "$PROFILE/packages.x86_64" "$PROFILE/packages.x86_64"
 ok "package list ($(wc -l < "$PROFILE/packages.x86_64") total, ${desktop_n} from install.sh)"
 
 # ── the local repo that carries Calamares ─────────────────────────────────────
-# Calamares is not in the official repositories, so tools/build-calamares.sh
-# builds it once into localrepo/ and the profile installs it from there.
-if [[ -d $LOCALREPO && -n $(echo "$LOCALREPO"/*.pkg.tar.* 2>/dev/null) ]]; then
+# A few packages are not in the official repositories — the installer itself,
+# and firmware for Broadcom wireless. tools/build-aur.sh builds them into
+# localrepo/ and the profile installs them from there.
+# Check for each one by name. "the directory is not empty" was enough when
+# there was a single package in it; with more than one, a half-built repo would
+# otherwise get past this and fail much later, inside pacstrap, as an
+# unresolvable target.
+aur_missing=()
+for _p in $(sed -n '/^AUR_PACKAGES=(/,/^)/p' "$HERE/tools/build-aur.sh" \
+            | sed '1d;$d' | awk '{print $1}'); do
+    compgen -G "$LOCALREPO/$_p-*.pkg.tar.*" >/dev/null || aur_missing+=("$_p")
+done
+
+if [[ -d $LOCALREPO && ${#aur_missing[@]} -eq 0 ]]; then
     cat >> "$PROFILE/pacman.conf" <<EOF
 
 [$LOCALDB]
@@ -152,9 +163,9 @@ EOF
 elif [[ $ASSEMBLE_ONLY -eq 1 ]]; then
     # Assembling is for inspecting the profile; not having built Calamares yet
     # is worth saying, but it is not a reason to refuse to lay the profile out.
-    warn "Calamares is not built — run ./tools/build-calamares.sh before the real build"
+    warn "not built: ${aur_missing[*]} — run ./tools/build-aur.sh before the real build"
 else
-    die "Calamares is not built yet. Run:  ./tools/build-calamares.sh"
+    die "not built: ${aur_missing[*]:-<none>}. Run:  ./tools/build-aur.sh"
 fi
 
 # ── branding ──────────────────────────────────────────────────────────────────

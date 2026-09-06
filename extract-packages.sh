@@ -48,9 +48,18 @@ out+=("${PKGS_GPU[@]}")
 out+=(vulkan-radeon)                        # amd
 out+=(vulkan-intel intel-media-driver)      # intel
 out+=(vulkan-virtio vulkan-swrast)          # virtual machines, and the fallback
-# NVIDIA is deliberately not here: nvidia-open-dkms, nvidia-utils and the
-# kernel headers DKMS needs come to 1.3GB, which is half again the size of the
-# ISO. An NVIDIA machine still installs — it is the one case that needs a
-# network for the graphics driver.
+out+=(nvidia-open-dkms nvidia-utils nvidia-settings egl-wayland
+      libva-nvidia-driver dkms linux-headers)   # nvidia
+# NVIDIA costs 1.3GB, most of it nvidia-utils, and it is carried so that an
+# NVIDIA machine installs without a network like every other machine.
+# install.sh removes the drivers this host has no use for once it knows what
+# the hardware is, so an AMD laptop does not keep 900MB of NVIDIA userspace.
+
+# Wireless the kernel cannot handle on its own. broadcom-wl-dkms drives the
+# BCM4360 in a 2013 MacBook Pro, which brcmfmac does not support at all, and
+# the BCM4331 in the older ones. install.sh decides whether this machine wants
+# it and blacklists the in-kernel drivers that would fight it for the card.
+# broadcom-bt-firmware is the bluetooth half of the same machines.
+out+=(broadcom-wl-dkms broadcom-bt-firmware dkms linux-headers)
 
 printf '%s\n' "${out[@]}" | sed '/^$/d' | LC_ALL=C sort -u

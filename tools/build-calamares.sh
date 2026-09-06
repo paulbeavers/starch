@@ -47,7 +47,14 @@ echo "    makepkg will ask for sudo to install build dependencies."
 
 step "Adding it to $REPO"
 mkdir -p "$REPO"
-mv -f "$WORK"/calamares/*.pkg.tar.* "$REPO"/
+# Not the -debug package: it is 60MB of detached symbols that nothing on the
+# ISO needs, and every byte of it would ride along in the squashfs.
+for pkg in "$WORK"/calamares/*.pkg.tar.*; do
+    case "$pkg" in *-debug-*) continue ;; esac
+    mv -f "$pkg" "$REPO"/
+done
+rm -f "$REPO"/*-debug-*.pkg.tar.*
+rm -f "$REPO/$DB.db.tar.zst" "$REPO/$DB.files.tar.zst" "$REPO/$DB.db" "$REPO/$DB.files"
 repo-add --quiet "$REPO/$DB.db.tar.zst" "$REPO"/*.pkg.tar.*
 ok "$(ls -1 "$REPO"/*.pkg.tar.* | wc -l) package(s) in the repo"
 ls -lh "$REPO"/*.pkg.tar.* | sed 's/^/      /'

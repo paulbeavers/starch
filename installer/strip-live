@@ -41,14 +41,40 @@ say "removing archiso boot machinery"
 # initramfs that cannot find its own root.
 rm -f /etc/mkinitcpio.conf.d/archiso.conf
 rm -f /etc/systemd/system/etc-pacman.d-gnupg.mount
-rm -f /etc/systemd/system/multi-user.target.wants/livecd-*.service
-rm -f /etc/systemd/system/multi-user.target.wants/choose-mirror.service
-rm -f /etc/systemd/system/*.wants/pacman-init.service
 rm -f /etc/systemd/system/pacman-init.service
 rm -f /etc/systemd/system/choose-mirror.service
 rm -f /etc/systemd/system/livecd-*.service
 rm -f /root/.automated_script.sh /root/.zlogin
 rm -f /etc/motd
+
+say "disabling services that were only enabled for the live image"
+# A copied filesystem inherits what the ISO had switched on, and archiso
+# switches on a lot that has no business being a default on someone's machine:
+#
+#   sshd            an installed desktop should not come up listening
+#   iwd + networkd  NetworkManager owns networking here, and two of them
+#                   fighting over an interface is a bad first boot
+#   choose-mirror   picks a mirror from the kernel command line
+#   pacman-init     populates the live keyring
+#   livecd-talk     the accessibility screen reader for the install medium
+#
+# "Enabled" is a symlink in a .wants directory, so removing the symlink is the
+# whole operation and it cannot fail halfway.
+for unit in sshd.service iwd.service systemd-networkd.service \
+            systemd-networkd-wait-online.service choose-mirror.service \
+            pacman-init.service livecd-talk.service livecd-alsa-unmuter.service; do
+    rm -f /etc/systemd/system/*.wants/"$unit"
+done
+rm -f /etc/systemd/system/sockets.target.wants/systemd-networkd.socket
+rm -f /etc/systemd/network/*.network
+
+# systemd-resolved stays enabled on purpose: /etc/resolv.conf is a symlink to
+# its stub, so disabling it here would leave the installed system pointing at a
+# file nothing writes, and DNS would simply stop.
+#
+# The hypervisor guest agents (hv_*, vboxservice, vmtoolsd) also stay. Each is
+# ConditionVirtualization-gated, so on real hardware they do nothing, and in a
+# VM they are what the user would have had to install by hand.
 
 say "removing packages that only the installer needed"
 # --nosave so their configuration goes too. Failure here is not fatal: an

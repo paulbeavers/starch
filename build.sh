@@ -130,7 +130,8 @@ desktop_n=$(printf '%s\n' "$desktop_pkgs" | wc -l)
 printf '%s\n' \
     calamares \
     cage qt6-wayland \
-    arch-install-scripts \
+    networkmanager \
+    archinstall arch-install-scripts dialog \
     parted gptfdisk dosfstools e2fsprogs btrfs-progs exfatprogs ntfs-3g \
     git jq \
     >> "$PROFILE/packages.x86_64"

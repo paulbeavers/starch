@@ -64,13 +64,26 @@ preflight() {
     if [[ -d /sys/firmware/efi ]]; then ok "UEFI boot"
     else warn "BIOS/legacy boot — pick a matching bootloader in archinstall"; fi
 
-    if ping -c1 -W3 archlinux.org >/dev/null 2>&1; then
-        ok "network is up"
-    else
-        warn "no network. The install downloads packages and will fail without it."
-        say  "    Wi-Fi: run 'iwctl' on another VT (Alt+F2), then come back."
-        return 1
-    fi
+    # tty1 autologins within seconds of boot, so this runs well before
+    # systemd-networkd has finished DHCP. A single check here answers "is the
+    # network up yet", not "can this machine reach the internet", and reports
+    # no network on a machine that is about to have one. Retry instead.
+    #
+    # A TCP connection rather than ping: ICMP is filtered in enough places
+    # that a failed ping is weak evidence, while port 443 on archlinux.org is
+    # what pacman actually needs to work.
+    local waited=0
+    until timeout 4 bash -c 'exec 3<>/dev/tcp/archlinux.org/443' 2>/dev/null; do
+        waited=$((waited + 4))
+        if [[ $waited -ge 20 ]]; then
+            warn "no network. The install downloads packages and will fail without it."
+            say  "    Wired should come up on its own; give it a moment and retry."
+            say  "    Wi-Fi: run 'iwctl' on another VT (Alt+F2), then come back."
+            return 1
+        fi
+        say "    waiting for the network (${waited}s)..."
+    done
+    ok "network is up"
 
     local mem
     mem=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
@@ -215,6 +228,17 @@ EOF
     sleep 2
     if ! archinstall; then
         err "archinstall did not complete"
+        return 1
+    fi
+
+    # archinstall exits 0 when you back out of its menus without installing,
+    # so a zero status is not evidence that anything was written. Stage 2
+    # would otherwise report "no installed Arch system found on any disk",
+    # which reads like a detection failure rather than "you did not install".
+    if ! findmnt -rn "$TARGET" >/dev/null 2>&1 && [[ -z $(find_target_root) ]]; then
+        err "archinstall exited without installing anything"
+        say "    Nothing was written to disk, so there is no system to set up."
+        say "    Run the installer again and complete archinstall's own steps."
         return 1
     fi
 

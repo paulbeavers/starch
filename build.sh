@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Build a bootable ISO of this setup.
+# Build the starch install ISO.
+#
+# starch is install media and nothing else. It boots to an installer, lays down
+# Arch plus this Hyprland setup, and then has no further existence — the
+# installed system is plain Arch, updated with pacman, with no custom repo or
+# branding left behind.
 #
 #     ./build.sh              build (needs root for mkarchiso)
 #     ./build.sh --check      verify prerequisites and print the plan, build nothing
@@ -27,10 +32,10 @@ OUT="${OUT:-$HERE/out}"
 
 # Live session identity.
 LIVE_USER="${LIVE_USER:-live}"
-ISO_NAME="hyprarch"
-ISO_LABEL="HYPRARCH_$(date +%Y%m)"
-ISO_PUBLISHER="hyprland-setup <https://github.com/paulbeavers/hyprland-setup>"
-ISO_APPLICATION="Hyprland desktop live/install medium"
+ISO_NAME="starch"
+ISO_LABEL="STARCH_$(date +%Y%m)"
+ISO_PUBLISHER="starch <https://github.com/paulbeavers/hyprland-setup>"
+ISO_APPLICATION="starch — Arch + Hyprland install medium"
 
 C_B=$'\e[34m'; C_G=$'\e[32m'; C_Y=$'\e[33m'; C_R=$'\e[31m'; C_0=$'\e[0m'
 step() { printf '\n%s==>%s %s\n' "$C_B" "$C_0" "$1"; }
@@ -100,10 +105,17 @@ rm -rf "$PROFILE"; mkdir -p "$PROFILE" "$OUT"
 cp -r "$RELENG/." "$PROFILE/"
 ok "copied stock releng profile"
 
-"$HERE/extract-packages.sh" >> "$PROFILE/packages.x86_64"
-# releng ships its own list; ours is appended, so de-duplicate.
+# The ISO is install media, not a live desktop, so it carries installer tooling
+# only. The 118 desktop packages are installed onto the *target* by install.sh
+# during the install; shipping them in the live squashfs as well was most of a
+# 2.5GB image that nothing on the ISO ever ran.
+printf '%s\n' \
+    archinstall arch-install-scripts \
+    parted gptfdisk dosfstools e2fsprogs btrfs-progs exfatprogs ntfs-3g \
+    git jq \
+    >> "$PROFILE/packages.x86_64"
 LC_ALL=C sort -u -o "$PROFILE/packages.x86_64" "$PROFILE/packages.x86_64"
-ok "package list merged ($(wc -l < "$PROFILE/packages.x86_64") total)"
+ok "installer package list ($(wc -l < "$PROFILE/packages.x86_64") total)"
 
 # ── branding ──────────────────────────────────────────────────────────────────
 sed -i \
@@ -126,9 +138,10 @@ for item in install.sh README.md config; do
     cp -r "$REPO/$item" "$DEST/"
 done
 install -d "$DEST/iso"
-for item in build.sh extract-packages.sh test-boot.sh archinstall.json README.md; do
+for item in build.sh extract-packages.sh test-boot.sh README.md; do
     cp "$HERE/$item" "$DEST/iso/"
 done
+cp -r "$HERE/installer" "$DEST/iso/"
 
 # The payload is source, so anything near a megabyte means something large got
 # swept in — exactly the failure this replaced.
@@ -157,24 +170,6 @@ echo "${LIVE_USER} ALL=(ALL) NOPASSWD: ALL" > "$AIR/etc/sudoers.d/00-live"
 chmod 440 "$AIR/etc/sudoers.d/00-live"
 ok "live user '${LIVE_USER}' (no password, passwordless sudo)"
 
-# The desktop config, exactly as install.sh would deploy it.
-install -d "$AIR/home/${LIVE_USER}/.config"
-cp -r "$REPO/config/." "$AIR/home/${LIVE_USER}/.config/"
-install -d "$AIR/etc/skel/.config"
-cp -r "$REPO/config/." "$AIR/etc/skel/.config/"
-ok "desktop config placed in the live home and /etc/skel"
-
-# install.sh normally generates monitors.lua from the detected displays, but
-# live media has no idea what it will boot on. An explicit catch-all is clearer
-# than leaning on Hyprland's implicit default, and hyprland.lua treats the file
-# as optional either way.
-cat > "$AIR/home/${LIVE_USER}/.config/hypr/monitors.lua" <<'EOF'
--- Live media: accept whatever displays are attached.
-hl.monitor({ output = "", mode = "preferred", position = "auto", scale = "auto" })
-EOF
-cp "$AIR/home/${LIVE_USER}/.config/hypr/monitors.lua" "$AIR/etc/skel/.config/hypr/monitors.lua"
-ok "live monitors.lua (auto-detect)"
-
 # ── autologin straight into Hyprland ──────────────────────────────────────────
 install -d "$AIR/etc/systemd/system/getty@tty1.service.d"
 cat > "$AIR/etc/systemd/system/getty@tty1.service.d/autologin.conf" <<EOF
@@ -183,32 +178,20 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin ${LIVE_USER} --noclear %I \$TERM
 EOF
 
+install -d "$AIR/home/${LIVE_USER}"
 cat > "$AIR/home/${LIVE_USER}/.bash_profile" <<'EOF'
-# Live media: land in the desktop rather than a shell. uwsm matches how the
-# installed system starts Hyprland, so the live session is not a special case.
-if [[ -z ${WAYLAND_DISPLAY:-} && $XDG_VTNR == 1 ]]; then
-    exec uwsm start -- hyprland.desktop
+# Install media: tty1 goes straight to the installer. Any other VT is a plain
+# shell, which matters when the installer is the thing that is broken.
+if [[ $XDG_VTNR == 1 ]]; then
+    exec starch-install
 fi
 EOF
-ok "tty1 autologin into Hyprland"
+ok "tty1 launches the installer"
 
-# ── a visible way to install ──────────────────────────────────────────────────
+# ── the installer ─────────────────────────────────────────────────────────────
 install -d "$AIR/usr/local/bin"
-cat > "$AIR/usr/local/bin/install-hyprarch" <<'EOF'
-#!/usr/bin/env bash
-# Installs Arch, then this desktop on top of it.
-set -euo pipefail
-echo "This installs Arch Linux and the Hyprland desktop onto a disk."
-echo "Everything on the target disk will be erased."
-echo
-read -rp "Continue? [y/N] " a; [[ ${a,,} == y ]] || exit 0
-sudo archinstall --config /usr/local/share/hyprland-setup/iso/archinstall.json
-echo
-echo "Base install done. Applying the desktop config..."
-sudo arch-chroot /mnt /usr/local/share/hyprland-setup/install.sh --configs-only
-EOF
-chmod 755 "$AIR/usr/local/bin/install-hyprarch"
-ok "install-hyprarch helper"
+install -m 755 "$HERE/installer/starch-install" "$AIR/usr/local/bin/starch-install"
+ok "installer at /usr/local/bin/starch-install"
 
 # archiso needs every airootfs file's mode declared in profiledef.sh.
 #
@@ -222,7 +205,7 @@ import re, sys, pathlib
 prof, user = pathlib.Path(sys.argv[1]), sys.argv[2]
 pd = prof / "profiledef.sh"
 s = pd.read_text()
-extra = f'''  ["/usr/local/bin/install-hyprarch"]="0:0:755"
+extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
   ["/home/{user}/"]="1000:1000:755"
   ["/etc/sudoers.d/00-live"]="0:0:440"
 '''

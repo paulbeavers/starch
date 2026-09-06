@@ -127,28 +127,22 @@ apply_desktop() {
 
     step "Running install.sh inside the new system"
     say "    This installs the desktop packages and deploys the config."
-    say "    ${C_D}It runs as root with HOME pointed at $home, then hands the"
-    say "    files back to $user — install.sh writes to \$XDG_CONFIG_HOME and"
-    say "    needs root for pacman and systemctl, which cannot both be true"
-    say "    for an unprivileged chroot user.${C_0}"
+    say "    ${C_D}--for-user is install.sh's mode for exactly this: it is root,"
+    say "    so it skips sudo entirely, writes the config into $user's home,"
+    say "    and chowns it back at the end. Without it install.sh refuses to"
+    say "    run as root, which is right everywhere except inside a chroot.${C_0}"
     say
 
+    # pacman inside the chroot needs working DNS.
     cp /etc/resolv.conf "$TARGET/etc/resolv.conf" 2>/dev/null || true
 
-    if arch-chroot "$TARGET" env \
-            HOME="$home" XDG_CONFIG_HOME="$home/.config" \
-            $home/hyprland-setup/install.sh; then
-        ok "desktop installed"
+    if arch-chroot "$TARGET" "$home/hyprland-setup/install.sh" --for-user "$user"; then
+        ok "desktop installed for $user"
     else
         err "install.sh failed inside the new system"
         say "    The base Arch install is intact. To retry:"
-        say "      arch-chroot $TARGET $home/hyprland-setup/install.sh"
+        say "      arch-chroot $TARGET $home/hyprland-setup/install.sh --for-user $user"
         return 1
-    fi
-
-    if [[ $user != root ]]; then
-        arch-chroot "$TARGET" chown -R "$user:$user" "$home"
-        ok "$home handed back to $user"
     fi
     return 0
 }

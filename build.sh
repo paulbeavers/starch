@@ -24,7 +24,10 @@
 set -euo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO="$(cd "$HERE/.." && pwd)"
+# The desktop half lives in its own repository, pinned here as a submodule, so
+# an ISO is reproducible from this repo's history: the commit recorded here is
+# exactly the config that goes on the medium.
+REPO="$HERE/hyprland-setup"
 RELENG="${RELENG:-/usr/share/archiso/configs/releng}"
 WORK="${WORK:-$HERE/work}"
 PROFILE="$WORK/profile"
@@ -70,6 +73,7 @@ fi
 # ── prerequisites ─────────────────────────────────────────────────────────────
 step "Checking prerequisites"
 command -v mkarchiso >/dev/null || die "archiso is not installed:  sudo pacman -S archiso"
+[[ -f $REPO/install.sh ]] || die "the hyprland-setup submodule is empty — run: git submodule update --init"
 [[ -d $RELENG ]] || die "stock releng profile not found at $RELENG"
 ok "archiso $(pacman -Q archiso 2>/dev/null | awk '{print $2}')"
 
@@ -128,20 +132,17 @@ ok "branded as $ISO_NAME ($ISO_LABEL)"
 
 # ── the repo itself, so the live session can install from it ──────────────────
 AIR="$PROFILE/airootfs"
-# An allowlist, not an exclude list. `tar -C "$REPO" -cf - .` emits members as
-# "./iso/out/...", which --exclude=iso/out does not match — so the 2.5GB ISO
-# from the previous build was being copied into the next one. Naming what goes
-# in cannot fail that way.
+# An allowlist, not an exclude list. An earlier version excluded build output by
+# name and the pattern silently did not match, so a 2.5GB ISO from the previous
+# build was copied into the next one. Naming what goes in cannot fail that way.
+#
+# Only the desktop repo ships. starch's own build tooling has no use on the
+# installed machine, and the point of starch is that nothing of it remains.
 DEST="$AIR/usr/local/share/hyprland-setup"
 install -d "$DEST"
 for item in install.sh README.md config; do
     cp -r "$REPO/$item" "$DEST/"
 done
-install -d "$DEST/iso"
-for item in build.sh extract-packages.sh test-boot.sh README.md; do
-    cp "$HERE/$item" "$DEST/iso/"
-done
-cp -r "$HERE/installer" "$DEST/iso/"
 
 # The payload is source, so anything near a megabyte means something large got
 # swept in — exactly the failure this replaced.

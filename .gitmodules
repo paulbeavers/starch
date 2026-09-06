@@ -1,0 +1,3 @@
+[submodule "hyprland-setup"]
+	path = hyprland-setup
+	url = git@github.com:paulbeavers/hyprland-setup.git

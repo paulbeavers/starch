@@ -9,8 +9,11 @@
 set -euo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL="$HERE/../install.sh"
-[[ -f $INSTALL ]] || { echo "install.sh not found next to iso/" >&2; exit 1; }
+INSTALL="$HERE/hyprland-setup/install.sh"
+[[ -f $INSTALL ]] || {
+    echo "hyprland-setup/install.sh not found — run: git submodule update --init" >&2
+    exit 1
+}
 
 # Source only the package arrays. install.sh guards its body behind a main
 # function and option parsing, so this pulls the declarations out instead of

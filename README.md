@@ -27,6 +27,39 @@ The repo lands in `~/hyprland-setup`, exactly where it would be if you had
 cloned it yourself. Keep it to re-run pieces later, or delete it; nothing
 depends on it being there.
 
+## Layout
+
+The desktop half — `install.sh` and the Hyprland configuration — lives in its
+own repository and is pinned here as a submodule:
+
+```
+build.sh              assembles the archiso profile and runs mkarchiso
+extract-packages.sh   derives the package list from the submodule's install.sh
+installer/            starch-install (menu) and starch-setup (guided install)
+test-boot.sh          boots the result in QEMU
+hyprland-setup/       submodule: the desktop install and config
+```
+
+Splitting them keeps the desktop usable on its own — clone that repo and run
+`install.sh` on an existing Arch system, no ISO involved — and pins exactly
+which version of the config an ISO carries, since the submodule records a
+commit rather than tracking a branch.
+
+Clone with the submodule:
+
+```bash
+git clone --recurse-submodules git@github.com:paulbeavers/starch.git
+# or, in an existing clone:
+git submodule update --init
+```
+
+Update the desktop config an ISO will ship:
+
+```bash
+git -C hyprland-setup pull
+git add hyprland-setup && git commit -m "Bump hyprland-setup"
+```
+
 ## Build
 
 ```bash
@@ -76,7 +109,7 @@ the worst possible place to find out.
 | Layer | Source |
 |---|---|
 | Installer packages | explicit list in `build.sh` |
-| The repo | `/usr/local/share/hyprland-setup`, by allowlist |
+| The desktop repo | the `hyprland-setup` submodule, by allowlist |
 | Installer | `installer/starch-install` |
 | Live user | `live`, no password, passwordless sudo |
 | Boot behaviour | tty1 runs the installer; other VTs are plain shells |

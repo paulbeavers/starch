@@ -238,6 +238,8 @@ pd = prof / "profiledef.sh"
 s = pd.read_text()
 extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
   ["/usr/local/bin/starch-setup"]="0:0:755"
+  ["/usr/local/share/hyprland-setup/install.sh"]="0:0:755"
+  ["/usr/local/share/hyprland-setup/config/hypr/scripts/"]="0:0:755"
   ["/home/{user}/"]="1000:1000:755"
   ["/etc/sudoers.d/00-live"]="0:0:440"
 '''

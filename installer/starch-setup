@@ -45,14 +45,21 @@ ask_disk() {
     # "Samsung\x20SSD\x20870". Decode it or the menu is unreadable.
     # TYPE comes first so MODEL can be last: read gives the final variable
     # everything remaining, and a model name contains spaces.
-    while read -r _type name size ro model; do
+    while read -r _type name bytes ro model; do
         [[ $ro == 1 ]] && continue
+        [[ ${bytes:-x} =~ ^[0-9]+$ ]] || continue
+        # Too small to install onto: an emulated floppy (/dev/fd0, which QEMU
+        # always presents), an empty card reader slot. Skipping them is not
+        # only tidiness — every one of them takes a number in the list, so the
+        # disk someone means to choose is not the number they reach for.
+        [[ $bytes -lt $((4 * 1024 * 1024 * 1024)) ]] && continue
         model="${model//\\x20/ }"
         devs+=("$name")
-        printf '      %-2s %-12s %-8s %s\n' "${#devs[@]})" "$name" "$size" "${model:-—}"
-    done < <(lsblk -dpnro TYPE,NAME,SIZE,RO,MODEL |
+        printf '      %-2s %-12s %-8s %s\n' "${#devs[@]})" "$name" \
+               "$(numfmt --to=iec "$bytes")" "${model:-—}"
+    done < <(lsblk -b -dpnro TYPE,NAME,SIZE,RO,MODEL |
              awk '$1=="disk"' |
-             grep -vE " /dev/(loop|sr|ram|zram|md|dm-)")
+             grep -vE " /dev/(loop|sr|ram|zram|md|dm-|fd)")
     [[ ${#devs[@]} -gt 0 ]] || die "no usable disks found"
     say
     local n
@@ -312,12 +319,15 @@ install_desktop() {
     ok "setup copied to $home/hyprland-setup"
 
     say
-    if arch-chroot "$TARGET" "$home/hyprland-setup/install.sh" --for-user "$USERNAME"; then
+    # Invoked through bash rather than executed: mkarchiso copies the ISO
+    # payload with --no-preserve=mode, so install.sh arrives here without its
+    # execute bit and chroot answers with a bare "Permission denied".
+    if arch-chroot "$TARGET" bash "$home/hyprland-setup/install.sh" --for-user "$USERNAME"; then
         ok "desktop installed"
     else
         err "the desktop install failed"
         say "    Arch itself is installed and bootable. To retry:"
-        say "      arch-chroot $TARGET $home/hyprland-setup/install.sh --for-user $USERNAME"
+        say "      arch-chroot $TARGET bash $home/hyprland-setup/install.sh --for-user $USERNAME"
         return 1
     fi
 }

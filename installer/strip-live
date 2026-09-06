@@ -40,6 +40,25 @@ say "removing archiso boot machinery"
 # squashfs on removable media. Left in place, the installed system builds an
 # initramfs that cannot find its own root.
 rm -f /etc/mkinitcpio.conf.d/archiso.conf
+
+# The preset is the part that actually drives mkinitcpio, and releng's builds
+# one image called "archiso" from the config just deleted. Removing the config
+# alone changes nothing: the preset still names it, and the installed system
+# ends up with no default or fallback initramfs at all. Put the stock preset
+# from the linux package back.
+cat > /etc/mkinitcpio.d/linux.preset <<'PRESET'
+# mkinitcpio preset file for the 'linux' package
+
+ALL_config="/etc/mkinitcpio.conf"
+ALL_kver="/boot/vmlinuz-linux"
+
+PRESETS=('default' 'fallback')
+
+default_image="/boot/initramfs-linux.img"
+
+fallback_image="/boot/initramfs-linux-fallback.img"
+fallback_options="-S autodetect"
+PRESET
 rm -f /etc/systemd/system/etc-pacman.d-gnupg.mount
 rm -f /etc/systemd/system/pacman-init.service
 rm -f /etc/systemd/system/choose-mirror.service

@@ -273,6 +273,7 @@ ok "Calamares configuration ($(ls -1 "$HERE/calamares/modules" | wc -l) modules)
 # The two scripts Calamares runs inside the target. They live outside
 # /usr/local/bin because they are not commands anyone should run by hand.
 install -d "$AIR/usr/local/lib/starch"
+install -m 755 "$HERE/installer/copy-kernel"       "$AIR/usr/local/lib/starch/copy-kernel"
 install -m 755 "$HERE/installer/strip-live"        "$AIR/usr/local/lib/starch/strip-live"
 install -m 755 "$HERE/installer/configure-desktop" "$AIR/usr/local/lib/starch/configure-desktop"
 ok "post-install scripts staged"
@@ -298,6 +299,7 @@ s = pd.read_text()
 extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
   ["/usr/local/bin/starch-setup"]="0:0:755"
   ["/usr/local/share/hyprland-setup/install.sh"]="0:0:755"
+  ["/usr/local/lib/starch/copy-kernel"]="0:0:755"
   ["/usr/local/lib/starch/strip-live"]="0:0:755"
   ["/usr/local/lib/starch/configure-desktop"]="0:0:755"
   ["/usr/local/share/hyprland-setup/config/hypr/scripts/"]="0:0:755"

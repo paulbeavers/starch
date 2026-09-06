@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Put a kernel in the target's /boot.
+#
+# mkarchiso empties /boot in the squashfs before packaging it ("Delete all
+# files in /boot"), because the live medium boots its kernel from the ISO
+# filesystem rather than from the image. Copying that image onto a disk
+# therefore produces a system with the linux package installed according to
+# pacman, and no kernel on disk — mkinitcpio then fails with
+#
+#     ERROR: Invalid option -k -- '/boot/vmlinuz-linux' must be readable
+#
+# and even if it did not, there would be nothing for the bootloader to boot.
+#
+# Only the kernel is taken. The initramfs beside it on the medium is the
+# archiso one, built to find a squashfs on removable media and roughly 250MB of
+# it; the installed system builds its own immediately after this.
+#
+# Runs in the live system, not the target, because /run/archiso is not visible
+# inside the chroot. Calamares passes the target's mount point as $1.
+set -uo pipefail
+
+TARGET="${1:?usage: copy-kernel <target-root>}"
+BOOT=/run/archiso/bootmnt/arch/boot
+
+[[ -d $TARGET ]] || { echo "  target $TARGET does not exist"; exit 1; }
+
+if [[ ! -f $BOOT/x86_64/vmlinuz-linux ]]; then
+    echo "  no kernel at $BOOT/x86_64/vmlinuz-linux"
+    exit 1
+fi
+
+install -d "$TARGET/boot"
+cp -f "$BOOT/x86_64/vmlinuz-linux" "$TARGET/boot/vmlinuz-linux" || exit 1
+echo "  installed vmlinuz-linux"
+
+# Microcode, if this medium carries it. The bootloader module picks it up only
+# when the file is there, so a missing one is not an error.
+for img in intel-ucode.img amd-ucode.img; do
+    if [[ -f "$BOOT/$img" ]]; then
+        cp -f "$BOOT/$img" "$TARGET/boot/$img" && echo "  installed $img"
+    fi
+done

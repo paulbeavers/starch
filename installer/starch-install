@@ -85,6 +85,19 @@ preflight() {
     done
     ok "network is up"
 
+    # The menu clears the screen the moment it draws, so anything the kernel
+    # or systemd complained about during boot is gone before it can be read.
+    # Count it here instead of leaving people to wonder what scrolled past.
+    local nerr
+    nerr=$(journalctl -p 3 -b -q --no-pager 2>/dev/null | grep -c . || true)
+    if [[ ${nerr:-0} -gt 0 ]]; then
+        warn "$nerr error-level message(s) in the boot log"
+        say  "    Most are harmless on live media (missing firmware, absent"
+        say  "    hardware). Read them with menu option 5, or: journalctl -p err -b"
+    else
+        ok "boot log is clean"
+    fi
+
     local mem
     mem=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
     [[ ${mem:-0} -ge 2 ]] && ok "${mem}GB RAM" || warn "only ${mem}GB RAM; this may be tight"
@@ -308,9 +321,10 @@ while true; do
   ${C_B}2${C_0}  Shell            ${C_D}(the installer is also on other VTs: Alt+F2)${C_0}
   ${C_B}3${C_0}  Reboot
   ${C_B}4${C_0}  Power off
+  ${C_B}5${C_0}  Boot log       ${C_D}(errors and warnings from this boot)${C_0}
 
 EOF
-    read -rp "  Choice [1-4]: " choice
+    read -rp "  Choice [1-5]: " choice
     case "$choice" in
         1) do_install; say; read -rp "Press Enter to return to the menu... " _ ;;
         2) say; say "Type 'exit' to come back to the menu."
@@ -319,6 +333,10 @@ EOF
            STARCH_SHELL=1 bash -l ;;
         3) reboot ;;
         4) poweroff ;;
+        5) clear
+           say "Errors and warnings from this boot:"; say
+           journalctl -p 4 -b -q --no-pager 2>/dev/null | tail -60
+           say; read -rp "Press Enter to return to the menu... " _ ;;
         *) ;;
     esac
 done

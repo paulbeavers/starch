@@ -1,0 +1,39 @@
+---
+componentName: starch
+
+welcomeStyleCalamares: false
+welcomeExpandingLogo: true
+windowExpanding: normal
+windowSize: 900px,560px
+windowPlacement: center
+sidebar: widget
+navigation: widget
+
+strings:
+    productName:         starch
+    shortProductName:    starch
+    version:             2026.09
+    shortVersion:        2026.09
+    versionedName:       starch 2026.09
+    shortVersionedName:  starch
+    bootloaderEntryName: starch
+    productUrl:          https://github.com/paulbeavers/starch
+    supportUrl:          https://github.com/paulbeavers/starch/issues
+    knownIssuesUrl:      https://github.com/paulbeavers/starch/issues
+    releaseNotesUrl:     https://github.com/paulbeavers/starch
+
+images:
+    productLogo:    "logo.png"
+    productIcon:    "logo.png"
+    productWelcome: "logo-small.png"
+
+slideshow: "show.qml"
+slideshowAPI: 2
+
+# Catppuccin Mocha, the same palette the desktop comes up in, so the installer
+# and the machine it installs do not look like different products.
+style:
+    SidebarBackground:         "#181825"
+    SidebarText:               "#cdd6f4"
+    SidebarBackgroundSelected: "#cba6f7"
+    SidebarTextSelected:       "#1e1e2e"

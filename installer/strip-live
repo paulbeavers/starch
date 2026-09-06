@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Turn the copied live filesystem into an installed system.
+#
+# Calamares installs by copying the ISO's own filesystem, which means the
+# target starts out as a clone of the install medium — autologin, a passwordless
+# live user, the installer itself, and an initramfs built to boot from a
+# squashfs on a CD. Every one of those has to go, and going quietly is not an
+# option: a leftover passwordless sudo rule is a security bug, and leftover
+# archiso hooks make the installed system unbootable.
+#
+# Runs inside the target with Calamares' chroot, so paths here are absolute in
+# the new system.
+set -uo pipefail
+
+say() { printf '  %s\n' "$*"; }
+
+LIVE_USER=live
+
+say "removing the live user"
+if id "$LIVE_USER" &>/dev/null; then
+    # The account is autologin-only and has no password; nothing in it is worth
+    # keeping and its home is a copy of the skeleton anyway.
+    userdel -r "$LIVE_USER" 2>/dev/null || userdel "$LIVE_USER" 2>/dev/null || true
+fi
+rm -rf "/home/$LIVE_USER"
+rm -f /etc/sysusers.d/zz-live.conf
+
+say "removing passwordless sudo and autologin"
+rm -f /etc/sudoers.d/00-live
+rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
+rmdir /etc/systemd/system/getty@tty1.service.d 2>/dev/null || true
+
+say "removing the installer"
+rm -f /usr/local/bin/starch-install /usr/local/bin/starch-setup
+rm -rf /etc/calamares /usr/share/calamares
+rm -f /usr/local/lib/starch/strip-live /usr/local/lib/starch/configure-desktop
+
+say "removing archiso boot machinery"
+# The live image boots through archiso's mkinitcpio hooks, which look for a
+# squashfs on removable media. Left in place, the installed system builds an
+# initramfs that cannot find its own root.
+rm -f /etc/mkinitcpio.conf.d/archiso.conf
+rm -f /etc/systemd/system/etc-pacman.d-gnupg.mount
+rm -f /etc/systemd/system/multi-user.target.wants/livecd-*.service
+rm -f /etc/systemd/system/multi-user.target.wants/choose-mirror.service
+rm -f /etc/systemd/system/*.wants/pacman-init.service
+rm -f /etc/systemd/system/pacman-init.service
+rm -f /etc/systemd/system/choose-mirror.service
+rm -f /etc/systemd/system/livecd-*.service
+rm -f /root/.automated_script.sh /root/.zlogin
+rm -f /etc/motd
+
+say "removing packages that only the installer needed"
+# --nosave so their configuration goes too. Failure here is not fatal: an
+# installed system with an extra package is a blemish, a failed install is not.
+pacman -Rns --noconfirm calamares cage qt6-wayland archinstall dialog 2>/dev/null || true
+
+say "restoring a normal boot"
+systemctl set-default graphical.target 2>/dev/null || true
+
+say "done"

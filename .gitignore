@@ -4,3 +4,6 @@
 /work-assemble/
 /out/
 /.vm/
+# Built by tools/build-calamares.sh — a package and its repo database, not source.
+/localrepo/
+/.build-calamares/

@@ -32,6 +32,10 @@ RELENG="${RELENG:-/usr/share/archiso/configs/releng}"
 WORK="${WORK:-$HERE/work}"
 PROFILE="$WORK/profile"
 OUT="${OUT:-$HERE/out}"
+# Where tools/build-calamares.sh leaves the one package that is not in the
+# official repositories.
+LOCALREPO="${LOCALREPO:-$HERE/localrepo}"
+LOCALDB=starch-local
 
 # Live session identity.
 LIVE_USER="${LIVE_USER:-live}"
@@ -109,17 +113,48 @@ rm -rf "$PROFILE"; mkdir -p "$PROFILE" "$OUT"
 cp -r "$RELENG/." "$PROFILE/"
 ok "copied stock releng profile"
 
-# The ISO is install media, not a live desktop, so it carries installer tooling
-# only. The 118 desktop packages are installed onto the *target* by install.sh
-# during the install; shipping them in the live squashfs as well was most of a
-# 2.5GB image that nothing on the ISO ever ran.
+# Calamares installs by copying the live filesystem onto the target, so the ISO
+# has to contain the finished system: the desktop packages ship here, not on
+# the other side of a download. That is what makes the install fast and lets it
+# work with no network at all.
+#
+# The desktop list comes from install.sh via extract-packages.sh, so the two
+# cannot drift — adding a package to install.sh puts it on the ISO too.
+desktop_pkgs="$("$HERE/extract-packages.sh")" \
+    || die "could not read the desktop package list from install.sh"
+printf '%s\n' "$desktop_pkgs" >> "$PROFILE/packages.x86_64"
+desktop_n=$(printf '%s\n' "$desktop_pkgs" | wc -l)
+
+# Installer tooling, and the graphical canvas Calamares is drawn on. cage is a
+# kiosk compositor: one application, full screen, no desktop around it.
 printf '%s\n' \
-    archinstall arch-install-scripts \
+    calamares \
+    cage qt6-wayland \
+    arch-install-scripts \
     parted gptfdisk dosfstools e2fsprogs btrfs-progs exfatprogs ntfs-3g \
-    git jq dialog \
+    git jq \
     >> "$PROFILE/packages.x86_64"
 LC_ALL=C sort -u -o "$PROFILE/packages.x86_64" "$PROFILE/packages.x86_64"
-ok "installer package list ($(wc -l < "$PROFILE/packages.x86_64") total)"
+ok "package list ($(wc -l < "$PROFILE/packages.x86_64") total, ${desktop_n} from install.sh)"
+
+# ── the local repo that carries Calamares ─────────────────────────────────────
+# Calamares is not in the official repositories, so tools/build-calamares.sh
+# builds it once into localrepo/ and the profile installs it from there.
+if [[ -d $LOCALREPO && -n $(echo "$LOCALREPO"/*.pkg.tar.* 2>/dev/null) ]]; then
+    cat >> "$PROFILE/pacman.conf" <<EOF
+
+[$LOCALDB]
+SigLevel = Optional TrustAll
+Server = file://$LOCALREPO
+EOF
+    ok "local repo wired in ($(ls -1 "$LOCALREPO"/*.pkg.tar.* 2>/dev/null | wc -l) package(s))"
+elif [[ $ASSEMBLE_ONLY -eq 1 ]]; then
+    # Assembling is for inspecting the profile; not having built Calamares yet
+    # is worth saying, but it is not a reason to refuse to lay the profile out.
+    warn "Calamares is not built — run ./tools/build-calamares.sh before the real build"
+else
+    die "Calamares is not built yet. Run:  ./tools/build-calamares.sh"
+fi
 
 # ── branding ──────────────────────────────────────────────────────────────────
 sed -i \
@@ -206,23 +241,40 @@ EOF
 
 install -d "$AIR/home/${LIVE_USER}"
 cat > "$AIR/home/${LIVE_USER}/.bash_profile" <<'EOF'
-# Install media: tty1 goes straight to the installer. Any other VT is a plain
-# shell, which matters when the installer is the thing that is broken.
+# Install media: tty1 brings up Calamares. Any other VT is a plain shell, which
+# matters when the installer is the thing that is broken.
 #
-# The wizard comes up first, because installing is what nearly everyone booted
-# this to do, and a menu whose first entry is the only one most people want is
-# a keystroke asking to be skipped. Quitting it falls through to the menu,
-# which still has the advanced install, a shell, the boot log and reboot.
+# cage is a kiosk compositor — it runs one application full screen and exits
+# when that application does, so there is no desktop to get lost in and nothing
+# to shut down afterwards. Calamares partitions disks, so it runs as root, and
+# so does the compositor holding its window.
 #
-# STARCH_SHELL guards against re-entry. The installer's Shell option runs a
-# login shell, which reads this file — without the guard it execs straight back
-# into the installer and the menu appears to ignore the choice.
+# Quitting Calamares drops to the text menu behind it, which still has the
+# advanced install, a shell, the boot log and reboot.
+#
+# STARCH_SHELL guards against re-entry. The menu's Shell option runs a login
+# shell, which reads this file — without the guard it execs straight back into
+# the installer and the menu appears to ignore the choice.
 if [[ $XDG_VTNR == 1 && -z ${STARCH_SHELL:-} ]]; then
-    starch-setup
+    sudo -E cage -- calamares -D6 2>>/tmp/calamares-session.log
     exec starch-install
 fi
 EOF
-ok "tty1 opens the install wizard, menu behind it"
+ok "tty1 opens Calamares under cage, menu behind it"
+
+# ── Calamares ─────────────────────────────────────────────────────────────────
+install -d "$AIR/etc/calamares/modules" "$AIR/etc/calamares/branding/starch"
+install -m 644 "$HERE/calamares/settings.conf" "$AIR/etc/calamares/settings.conf"
+install -m 644 "$HERE/calamares/modules/"*.conf "$AIR/etc/calamares/modules/"
+install -m 644 "$HERE/calamares/branding/starch/"* "$AIR/etc/calamares/branding/starch/"
+ok "Calamares configuration ($(ls -1 "$HERE/calamares/modules" | wc -l) modules)"
+
+# The two scripts Calamares runs inside the target. They live outside
+# /usr/local/bin because they are not commands anyone should run by hand.
+install -d "$AIR/usr/local/lib/starch"
+install -m 755 "$HERE/installer/strip-live"        "$AIR/usr/local/lib/starch/strip-live"
+install -m 755 "$HERE/installer/configure-desktop" "$AIR/usr/local/lib/starch/configure-desktop"
+ok "post-install scripts staged"
 
 # ── the installer ─────────────────────────────────────────────────────────────
 install -d "$AIR/usr/local/bin"
@@ -245,6 +297,8 @@ s = pd.read_text()
 extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
   ["/usr/local/bin/starch-setup"]="0:0:755"
   ["/usr/local/share/hyprland-setup/install.sh"]="0:0:755"
+  ["/usr/local/lib/starch/strip-live"]="0:0:755"
+  ["/usr/local/lib/starch/configure-desktop"]="0:0:755"
   ["/usr/local/share/hyprland-setup/config/hypr/scripts/"]="0:0:755"
   ["/home/{user}/"]="1000:1000:755"
   ["/etc/sudoers.d/00-live"]="0:0:440"

@@ -116,7 +116,15 @@ partition_disk() {
     local sep=""; [[ $DISK =~ [0-9]$ ]] && sep=p
     ESP="${DISK}${sep}1"
     ROOT="${DISK}${sep}2"
-    [[ -b $ESP && -b $ROOT ]] || die "expected $ESP and $ROOT to exist after partitioning"
+
+    # udevadm settle usually suffices, but device nodes can lag the kernel
+    # re-reading the table, and failing here means a wiped disk and no install.
+    # Wait a few seconds before giving up rather than losing on a race.
+    local waited=0
+    until [[ -b $ESP && -b $ROOT ]]; do
+        sleep 1; waited=$((waited + 1))
+        [[ $waited -ge 10 ]] && die "$ESP and $ROOT did not appear after partitioning $DISK"
+    done
     ok "$ESP (EFI, 1GiB) and $ROOT (root, rest)"
 
     step "Formatting"

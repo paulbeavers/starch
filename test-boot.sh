@@ -66,7 +66,15 @@ args=(
 # outside while somebody watches the window. "sendkey" reaches the guest below
 # the host compositor, so it works without the passthrough submap, and
 # "screendump" captures the framebuffer without needing the guest's help.
-[[ $MONITOR -eq 0 ]] || args+=(-monitor "unix:$VMDIR/monitor.sock,server,nowait")
+#
+# screendump needs a plain QEMU surface to read: with virtio-vga-gl the guest
+# renders into GL and the monitor answers "Error: no surface". So --monitor
+# also drops back to the standard VGA adapter. The guest then renders in
+# software, which costs nothing here — the installer is not a 3D application.
+if [[ $MONITOR -eq 1 ]]; then
+    args+=(-monitor "unix:$VMDIR/monitor.sock,server,nowait")
+    [[ ${DISPLAY_ARGS[0]} == -nographic ]] || DISPLAY_ARGS=(-vga std -display gtk)
+fi
 
 [[ -f "$VMDIR/test-disk.qcow2" ]] || qemu-img create -f qcow2 "$VMDIR/test-disk.qcow2" 20G
 

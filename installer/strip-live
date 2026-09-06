@@ -33,7 +33,8 @@ rmdir /etc/systemd/system/getty@tty1.service.d 2>/dev/null || true
 say "removing the installer"
 rm -f /usr/local/bin/starch-install /usr/local/bin/starch-setup
 rm -rf /etc/calamares /usr/share/calamares
-rm -f /usr/local/lib/starch/strip-live /usr/local/lib/starch/configure-desktop
+# Not /usr/local/lib/starch: configure-desktop lives there and has not run yet.
+# It clears the directory itself once it is finished.
 
 say "removing archiso boot machinery"
 # The live image boots through archiso's mkinitcpio hooks, which look for a

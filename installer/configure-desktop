@@ -27,3 +27,12 @@ fi
 
 echo "  configuring the desktop for $USER_NAME"
 bash "$REPO/install.sh" --for-user "$USER_NAME"
+rc=$?
+
+# Last one out. strip-live cannot remove these, because this script is one of
+# them and runs after it — so the clean-up lands here instead. Unlinking a
+# running script is safe: the shell holds the file open and the inode outlives
+# the directory entry.
+rm -rf /usr/local/lib/starch
+
+exit $rc

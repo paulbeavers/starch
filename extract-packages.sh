@@ -35,8 +35,22 @@ out+=(archinstall arch-install-scripts gparted parted dosfstools e2fsprogs
       linux linux-firmware mkinitcpio mkinitcpio-archiso syslinux
       memtest86+-efi edk2-shell)
 
-# Every GPU vendor, because live media cannot know the host.
-out+=(mesa vulkan-radeon vulkan-intel vulkan-nouveau vulkan-icd-loader
-      libva-mesa-driver intel-media-driver)
+# Graphics, for every vendor, because the medium cannot know the host — and
+# because since the install became a copy of this image, whatever is missing
+# here cannot be fetched later. install.sh picks per-host at install time from
+# exactly this set; anything it wants that is absent turns an offline install
+# into one that stops and asks for a network.
+#
+# PKGS_GPU above is the vendor-neutral base, sourced from install.sh so the two
+# cannot drift. The per-vendor additions are spelled out because install.sh
+# builds them in a loop over the hardware it finds, which cannot be sourced.
+out+=("${PKGS_GPU[@]}")
+out+=(vulkan-radeon)                        # amd
+out+=(vulkan-intel intel-media-driver)      # intel
+out+=(vulkan-virtio vulkan-swrast)          # virtual machines, and the fallback
+# NVIDIA is deliberately not here: nvidia-open-dkms, nvidia-utils and the
+# kernel headers DKMS needs come to 1.3GB, which is half again the size of the
+# ISO. An NVIDIA machine still installs — it is the one case that needs a
+# network for the graphics driver.
 
 printf '%s\n' "${out[@]}" | sed '/^$/d' | LC_ALL=C sort -u

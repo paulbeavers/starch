@@ -1,0 +1,263 @@
+#!/usr/bin/env bash
+# starch guided install.
+#
+# Asks six questions, then installs Arch and the Hyprland desktop without
+# further interaction.
+#
+# The disk work is done here rather than handed to archinstall's JSON. Its
+# "default_layout" mode does not compute a layout from a device name — it
+# requires every partition spelled out with sizes, byte offsets, sector sizes
+# and UUIDs, which is a great deal of fiddly generated input for the one
+# operation that destroys data if it is wrong. Its "pre_mounted_config" mode
+# takes filesystems that are already mounted, so starch partitions with sgdisk
+# and mkfs (visible, boring, testable) and archinstall does the rest: pacstrap,
+# bootloader, users, locale, mirrors.
+#
+# It also means /mnt is still mounted when archinstall finishes, so stage 2
+# needs no guessing about where the new system went.
+set -uo pipefail
+
+REPO_SRC=/usr/local/share/hyprland-setup
+TARGET=/mnt
+WORK=/run/starch
+
+C_B=$'\e[1;34m'; C_G=$'\e[1;32m'; C_Y=$'\e[1;33m'; C_R=$'\e[1;31m'; C_D=$'\e[2m'; C_0=$'\e[0m'
+say()  { printf '%s\n' "$*"; }
+step() { printf '\n%s==>%s %s\n' "$C_B" "$C_0" "$*"; }
+ok()   { printf '    %s✓%s %s\n' "$C_G" "$C_0" "$*"; }
+warn() { printf '    %s!%s %s\n' "$C_Y" "$C_0" "$*"; }
+err()  { printf '\n%sERROR:%s %s\n' "$C_R" "$C_0" "$*" >&2; }
+die()  { err "$*"; exit 1; }
+
+[[ $EUID -eq 0 ]] || exec sudo "$0" "$@"
+
+# ── questions ─────────────────────────────────────────────────────────────────
+ask_disk() {
+    step "Which disk should Arch be installed on?"
+    say  "    ${C_R}Everything on the disk you pick will be erased.${C_0}"
+    say
+    local -a devs=()
+    while read -r name size model; do
+        devs+=("$name")
+        printf '      %-2s %-12s %-8s %s\n' "${#devs[@]})" "$name" "$size" "$model"
+    done < <(lsblk -dpnro NAME,SIZE,MODEL | grep -vE "^/dev/(loop|sr|ram)")
+    [[ ${#devs[@]} -gt 0 ]] || die "no disks found"
+    say
+    local n
+    read -rp "    Disk [1-${#devs[@]}]: " n
+    DISK="${devs[$((n-1))]:-}"
+    [[ -b ${DISK:-} ]] || die "not a disk: ${DISK:-<none>}"
+
+    say
+    say "    ${C_Y}$DISK currently contains:${C_0}"
+    lsblk -pno NAME,SIZE,FSTYPE,LABEL "$DISK" | sed 's/^/      /'
+    say
+    local confirm
+    read -rp "    Type ERASE to wipe $DISK: " confirm
+    [[ $confirm == ERASE ]] || die "not confirmed"
+}
+
+ask_rest() {
+    step "A few more things"
+    read -rp "    Hostname [starch]: " HOSTNAME_; HOSTNAME_="${HOSTNAME_:-starch}"
+
+    while :; do
+        read -rp "    Your username: " USERNAME
+        [[ $USERNAME =~ ^[a-z_][a-z0-9_-]*$ ]] && break
+        warn "lowercase letters, digits, - and _ only"
+    done
+
+    local p1 p2
+    while :; do
+        read -rsp "    Password for $USERNAME: " p1; say
+        read -rsp "    Repeat it: " p2; say
+        [[ -n $p1 && $p1 == "$p2" ]] && { PASSWORD="$p1"; break; }
+        warn "empty or does not match"
+    done
+
+    read -rp "    Timezone [UTC]: " TIMEZONE; TIMEZONE="${TIMEZONE:-UTC}"
+    [[ -f /usr/share/zoneinfo/$TIMEZONE ]] || { warn "unknown timezone, using UTC"; TIMEZONE=UTC; }
+
+    read -rp "    Filesystem — 1) ext4  2) btrfs  [1]: " fs
+    case "${fs:-1}" in 2) FSTYPE=btrfs ;; *) FSTYPE=ext4 ;; esac
+
+    read -rp "    Keyboard layout [us]: " KBLAYOUT; KBLAYOUT="${KBLAYOUT:-us}"
+}
+
+# ── partition ─────────────────────────────────────────────────────────────────
+# One scheme, deliberately: GPT, a 1GiB EFI system partition, and root filling
+# the rest. Anyone who wants LVM, RAID or a separate /home is better served by
+# archinstall directly, which the menu still offers.
+partition_disk() {
+    step "Partitioning $DISK"
+
+    wipefs -af "$DISK" >/dev/null 2>&1
+    sgdisk --zap-all "$DISK" >/dev/null 2>&1
+    sgdisk --clear \
+        --new=1:0:+1GiB --typecode=1:ef00 --change-name=1:EFI \
+        --new=2:0:0     --typecode=2:8300 --change-name=2:starch \
+        "$DISK" >/dev/null || die "partitioning failed"
+    partprobe "$DISK" 2>/dev/null
+    udevadm settle 2>/dev/null
+
+    # nvme0n1 partitions are nvme0n1p1; sda partitions are sda1.
+    local sep=""; [[ $DISK =~ [0-9]$ ]] && sep=p
+    ESP="${DISK}${sep}1"
+    ROOT="${DISK}${sep}2"
+    [[ -b $ESP && -b $ROOT ]] || die "expected $ESP and $ROOT to exist after partitioning"
+    ok "$ESP (EFI, 1GiB) and $ROOT (root, rest)"
+
+    step "Formatting"
+    mkfs.fat -F32 -n EFI "$ESP" >/dev/null || die "mkfs.fat failed"
+    case "$FSTYPE" in
+        btrfs) mkfs.btrfs -f -L starch "$ROOT" >/dev/null || die "mkfs.btrfs failed" ;;
+        *)     mkfs.ext4 -F -L starch "$ROOT" >/dev/null || die "mkfs.ext4 failed" ;;
+    esac
+    ok "$FSTYPE on $ROOT, fat32 on $ESP"
+
+    step "Mounting at $TARGET"
+    mountpoint -q "$TARGET" && umount -R "$TARGET" 2>/dev/null
+    mkdir -p "$TARGET"
+    if [[ $FSTYPE == btrfs ]]; then
+        # The @ subvolume is what archinstall and most guides use, so a system
+        # installed here looks like any other btrfs Arch install.
+        mount "$ROOT" "$TARGET" || die "mount failed"
+        btrfs subvolume create "$TARGET/@" >/dev/null || die "could not create @"
+        umount "$TARGET"
+        mount -o subvol=@ "$ROOT" "$TARGET" || die "mount of @ failed"
+    else
+        mount "$ROOT" "$TARGET" || die "mount failed"
+    fi
+    mkdir -p "$TARGET/boot"
+    mount "$ESP" "$TARGET/boot" || die "could not mount the ESP"
+    ok "mounted"
+    findmnt -nR "$TARGET" -o TARGET,SOURCE | sed 's/^/      /'
+}
+
+# ── archinstall ───────────────────────────────────────────────────────────────
+run_archinstall() {
+    step "Writing the archinstall configuration"
+    mkdir -p "$WORK"
+
+    local hash
+    hash="$(openssl passwd -6 "$PASSWORD")" || die "could not hash the password"
+
+    HOSTNAME_="$HOSTNAME_" TIMEZONE="$TIMEZONE" KBLAYOUT="$KBLAYOUT" \
+    USERNAME="$USERNAME" PWHASH="$hash" WORK="$WORK" \
+    python3 - <<'PY'
+import json, os
+
+work = os.environ["WORK"]
+
+# pre_mounted_config: the filesystems are already mounted at /mnt, so
+# archinstall installs onto them rather than partitioning anything itself.
+config = {
+    "archinstall-language": "English",
+    "disk_config": {"config_type": "pre_mounted_config", "mountpoint": "/mnt"},
+    "bootloader_config": {"bootloader": "Systemd-boot", "uki": False, "removable": False},
+    "hostname": os.environ["HOSTNAME_"],
+    "kernels": ["linux"],
+    "locale_config": {"kb_layout": os.environ["KBLAYOUT"], "sys_enc": "UTF-8", "sys_lang": "en_US"},
+    "network_config": {"type": "nm"},
+    "audio_config": {"audio": "pipewire"},
+    "ntp": True,
+    "timezone": os.environ["TIMEZONE"],
+    "swap": {"enabled": True, "algorithm": "zstd"},
+    # The desktop is installed by install.sh afterwards, so archinstall lays
+    # down a minimal base and nothing opinionated on top of it.
+    "profile_config": {"profile": {"main": "Minimal"}},
+    "packages": ["base-devel", "git", "sudo", "networkmanager"],
+    "no_pkg_lookups": False,
+    "offline": False,
+    "silent": True,
+    "script": "guided",
+    "version": "2.8.6",
+}
+
+creds = {
+    "users": [{"username": os.environ["USERNAME"],
+               "enc_password": os.environ["PWHASH"],
+               "sudo": True}],
+}
+
+json.dump(config, open(f"{work}/config.json", "w"), indent=2)
+json.dump(creds, open(f"{work}/creds.json", "w"), indent=2)
+PY
+    chmod 600 "$WORK/creds.json"
+    ok "config.json and creds.json"
+
+    step "Installing Arch"
+    say "    archinstall is doing the base install. This takes a few minutes."
+    say
+    if ! archinstall --config "$WORK/config.json" --creds "$WORK/creds.json" --silent; then
+        err "archinstall failed"
+        say "    $TARGET is left mounted so you can look around."
+        return 1
+    fi
+    ok "base system installed"
+}
+
+# ── the desktop ───────────────────────────────────────────────────────────────
+install_desktop() {
+    step "Installing the Hyprland desktop"
+
+    mountpoint -q "$TARGET" || die "$TARGET is not mounted; cannot continue"
+    local home="/home/$USERNAME"
+    [[ -d "$TARGET$home" ]] || die "$TARGET$home does not exist — archinstall did not create the user"
+
+    cp -r "$REPO_SRC" "$TARGET$home/hyprland-setup" || die "could not copy the setup"
+    cp /etc/resolv.conf "$TARGET/etc/resolv.conf" 2>/dev/null || true
+    ok "setup copied to $home/hyprland-setup"
+
+    say
+    if arch-chroot "$TARGET" "$home/hyprland-setup/install.sh" --for-user "$USERNAME"; then
+        ok "desktop installed"
+    else
+        err "the desktop install failed"
+        say "    Arch itself is installed and bootable. To retry:"
+        say "      arch-chroot $TARGET $home/hyprland-setup/install.sh --for-user $USERNAME"
+        return 1
+    fi
+}
+
+# ── main ──────────────────────────────────────────────────────────────────────
+clear
+cat <<'EOF'
+
+      _             _
+  ___| |_ __ _ _ __| |__
+ / __| __/ _` | '__| '_ \
+ \__ \ || (_| | |  | | | |
+ |___/\__\__,_|_|  |_| |_|
+
+ A guided install of Arch Linux with the Hyprland desktop.
+ Six questions, then it runs on its own.
+
+EOF
+read -rp "  Continue? [y/N] " a; [[ ${a,,} == y ]] || exit 0
+
+ask_disk
+ask_rest
+
+step "Ready"
+say "    disk       $DISK  (${FSTYPE}, will be erased)"
+say "    hostname   $HOSTNAME_"
+say "    user       $USERNAME"
+say "    timezone   $TIMEZONE"
+say "    keyboard   $KBLAYOUT"
+say
+read -rp "    Start the install? [y/N] " a; [[ ${a,,} == y ]] || exit 0
+
+partition_disk   || exit 1
+run_archinstall  || exit 1
+install_desktop  || exit 1
+
+step "Done"
+say "    Arch and Hyprland are installed."
+say "    Log in as $USERNAME after rebooting."
+say
+read -rp "    Reboot now? [y/N] " a
+if [[ ${a,,} == y ]]; then
+    umount -R "$TARGET" 2>/dev/null
+    reboot
+fi

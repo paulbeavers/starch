@@ -317,23 +317,25 @@ EOF
 while true; do
     banner
     cat <<EOF
-  ${C_B}1${C_0}  Install Arch + Hyprland
-  ${C_B}2${C_0}  Shell            ${C_D}(the installer is also on other VTs: Alt+F2)${C_0}
-  ${C_B}3${C_0}  Reboot
-  ${C_B}4${C_0}  Power off
-  ${C_B}5${C_0}  Boot log       ${C_D}(errors and warnings from this boot)${C_0}
+  ${C_B}1${C_0}  Install Arch + Hyprland    ${C_D}(guided — six questions, then automatic)${C_0}
+  ${C_B}2${C_0}  Advanced install           ${C_D}(archinstall's own interface)${C_0}
+  ${C_B}3${C_0}  Shell            ${C_D}(the installer is also on other VTs: Alt+F2)${C_0}
+  ${C_B}4${C_0}  Reboot
+  ${C_B}5${C_0}  Power off
+  ${C_B}6${C_0}  Boot log       ${C_D}(errors and warnings from this boot)${C_0}
 
 EOF
-    read -rp "  Choice [1-5]: " choice
+    read -rp "  Choice [1-6]: " choice
     case "$choice" in
-        1) do_install; say; read -rp "Press Enter to return to the menu... " _ ;;
-        2) say; say "Type 'exit' to come back to the menu."
+        1) starch-setup; say; read -rp "Press Enter to return to the menu... " _ ;;
+        2) do_install; say; read -rp "Press Enter to return to the menu... " _ ;;
+        3) say; say "Type 'exit' to come back to the menu."
            # STARCH_SHELL stops ~/.bash_profile exec'ing the installer again,
            # which would drop straight back to this menu.
            STARCH_SHELL=1 bash -l ;;
-        3) reboot ;;
-        4) poweroff ;;
-        5) clear
+        4) reboot ;;
+        5) poweroff ;;
+        6) clear
            say "Errors and warnings from this boot:"; say
            journalctl -p 4 -b -q --no-pager 2>/dev/null | tail -60
            say; read -rp "Press Enter to return to the menu... " _ ;;

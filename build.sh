@@ -195,7 +195,8 @@ ok "tty1 launches the installer"
 # ── the installer ─────────────────────────────────────────────────────────────
 install -d "$AIR/usr/local/bin"
 install -m 755 "$HERE/installer/starch-install" "$AIR/usr/local/bin/starch-install"
-ok "installer at /usr/local/bin/starch-install"
+install -m 755 "$HERE/installer/starch-setup"   "$AIR/usr/local/bin/starch-setup"
+ok "installer at /usr/local/bin/{starch-install,starch-setup}"
 
 # archiso needs every airootfs file's mode declared in profiledef.sh.
 #
@@ -210,6 +211,7 @@ prof, user = pathlib.Path(sys.argv[1]), sys.argv[2]
 pd = prof / "profiledef.sh"
 s = pd.read_text()
 extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
+  ["/usr/local/bin/starch-setup"]="0:0:755"
   ["/home/{user}/"]="1000:1000:755"
   ["/etc/sudoers.d/00-live"]="0:0:440"
 '''

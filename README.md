@@ -35,9 +35,12 @@ own repository and is pinned here as a submodule:
 ```
 build.sh              assembles the archiso profile and runs mkarchiso
 extract-packages.sh   derives the package list from the submodule's install.sh
-installer/            starch-install (menu) and starch-setup (guided install)
+calamares/            installer sequence, module config and branding
+installer/            scripts the install runs, plus the text-menu fallback
+tools/build-aur.sh    builds what the official repos do not carry
 test-boot.sh          boots the result in QEMU
 hyprland-setup/       submodule: the desktop install and config
+localrepo/            built packages (gitignored; make it with build-aur.sh)
 ```
 
 Splitting them keeps the desktop usable on its own — clone that repo and run
@@ -63,10 +66,30 @@ git add hyprland-setup && git commit -m "Bump hyprland-setup"
 ## Build
 
 ```bash
-sudo pacman -S archiso            # once
+sudo pacman -S archiso base-devel   # once
+./tools/build-aur.sh                # once: builds Calamares, ~20 minutes
+sudo ./build.sh                     # ~3GB, 20-40 minutes
+```
+
+`tools/build-aur.sh` is not optional and is easy to miss. Two packages are not
+in the official repositories — Calamares itself, and the Broadcom bluetooth
+firmware — and `mkarchiso` installs from repositories, not from files. So they
+are built once into `localrepo/`, which `build.sh` adds to the profile's
+pacman.conf. `localrepo/` is gitignored, because it holds built packages rather
+than source: a fresh clone has to run this before the first build. `build.sh`
+refuses to start without it and names what is missing.
+
+It skips anything already built. Rebuilding Calamares takes twenty minutes and
+nothing about it changes between ISOs; `--force` rebuilds anyway.
+
+Everything else — including, perhaps surprisingly, `broadcom-wl-dkms` — comes
+from the official repositories.
+
+Other useful modes:
+
+```bash
 ./build.sh --check                # verify prerequisites, build nothing
-./build.sh --assemble             # assemble the profile, no root, no build
-sudo ./build.sh                   # ~1GB download, 10-30 minutes
+./build.sh --assemble             # lay out the profile, no root, no build
 ```
 
 Test it without burning anything:
@@ -75,28 +98,48 @@ Test it without burning anything:
 sudo pacman -S qemu-desktop edk2-ovmf
 ./test-boot.sh                    # UEFI, graphical
 ./test-boot.sh --bios             # legacy boot path
+./test-boot.sh --monitor          # expose QEMU's monitor on a socket, for
+                                  # driving it and taking screenshots
 ```
 
 ## What the ISO is
 
-Install media, not a live desktop. It boots to a text menu on tty1 and carries
-installer tooling only — `archinstall`, partitioning and filesystem tools, git.
-The 118 desktop packages are installed onto the *target* during stage 2, not
-shipped in the live image.
+A live desktop that installs itself. tty1 starts Hyprland, and the session
+starts Calamares. That is not decoration: it is what gives the medium a network
+applet, a terminal and a file manager, so someone can join a wifi network and
+check the machine works before committing a disk to it. An installer alone
+cannot do any of that.
 
-An earlier version booted into a live Hyprland session. That made the ISO 2.5GB
-of packages that nothing on the ISO ever ran.
+Quitting Calamares leaves the desktop running. Logging out, or a desktop that
+will not start at all, falls through to a text menu with the older installer, a
+shell and this boot's log.
 
-## The install, in two stages
+## How the install works
 
-1. **archinstall** does the base: partitioning, filesystems, LUKS, bootloader,
-   user accounts. That is the part where a bug destroys data, so it stays with
-   the upstream tool that is maintained and tested by people who do only that.
-2. **`install.sh`** then runs inside the new system and applies the desktop.
+Calamares copies the live filesystem onto the target — the same image you have
+been using, so what gets installed is what you tested — and then turns that
+copy into an ordinary system. The whole install is a file copy: it needs no
+network, on any supported hardware.
 
-They are not wired together through archinstall's JSON config. Its schema moves
-between releases, and a silent mismatch would look like a working install right
-up until first boot.
+That is why the ISO is ~3GB. It carries the finished desktop, every graphics
+vendor's driver and the Broadcom wireless one, because it cannot know what it
+will be installed onto. `install.sh` removes the drivers the hardware rules out
+once it knows, so an AMD laptop does not keep 900MB of NVIDIA userspace.
+
+Copying an image has one recurring hazard, which cost several rounds to learn:
+**the live medium keeps things outside its own filesystem**, and each of them
+has to be put back by hand.
+
+| What | Where it really lives | Restored by |
+|---|---|---|
+| Kernel | deleted from `/boot`; a copy survives in `/usr/lib/modules` | `copy-kernel` |
+| Microcode | deleted from `/boot`; raw files survive in `/usr/lib/firmware` | `add-microcode` |
+| Pacman keyring | a tmpfs, filled at boot | `strip-live` |
+| Live user, autologin, archiso hooks | present, and must not be | `strip-live` |
+
+The first exec step checks a kernel can be found, before the partitioner runs.
+An earlier version discovered that after repartitioning, which left a machine
+with no OS and no way to finish.
 
 ## How the profile is put together
 
@@ -108,11 +151,14 @@ the worst possible place to find out.
 
 | Layer | Source |
 |---|---|
+| Desktop packages | `extract-packages.sh`, derived from `install.sh` |
 | Installer packages | explicit list in `build.sh` |
+| Calamares | `localrepo/`, built by `tools/build-aur.sh` |
+| Calamares config | `calamares/` — sequence, modules, branding |
+| Post-install scripts | `installer/` — run in the target during the install |
 | The desktop repo | the `hyprland-setup` submodule, by allowlist |
-| Installer | `installer/starch-install` |
-| Live user | `live`, no password, passwordless sudo |
-| Boot behaviour | tty1 runs the installer; other VTs are plain shells |
+| Live user | `live`, uid 1500 so the installed user gets 1000 |
+| Boot behaviour | tty1 starts the desktop; other VTs are plain shells |
 
 ## Rebuilding later
 
@@ -130,6 +176,9 @@ bootloader configs whenever `archiso` itself is updated.
 
 ## Caveats
 
-- The install path is **not yet tested end to end**. The ISO boots and the
-  menu appears; a full disk install has not been exercised.
-- `test-boot.sh` needs a display for the graphical mode.
+- Requires **UEFI**. The partitioner writes GPT with an EFI system partition
+  and installs systemd-boot; there is no BIOS path.
+- `test-boot.sh` needs a display for the graphical mode. `--monitor` drops back
+  to a plain framebuffer, because QEMU cannot screenshot a GL surface.
+- The Broadcom driver is chosen from a list of eight PCI IDs. Anything else is
+  left to the in-kernel drivers, which handle most modern Broadcom parts.

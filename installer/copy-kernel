@@ -11,71 +11,49 @@
 #
 # and even if it did not, there would be nothing for the bootloader to boot.
 #
-# Only the kernel is taken. The initramfs beside it on the medium is archiso's,
-# built to find a squashfs on removable media and around 250MB of it; the
-# installed system builds its own immediately after this.
+# The kernel is taken from /usr/lib/modules/<version>/vmlinuz, not from the
+# install medium. The linux package installs it in both places and mkarchiso
+# only empties /boot, so that copy is inside the squashfs and arrives on the
+# target with everything else. Reading it from the medium was the first
+# approach and it broke on real hardware: the medium is not always still
+# mounted by the time this runs, and where it is mounted is not something to
+# rely on. Nothing here needs the medium at all now.
 #
-#     copy-kernel --check          say whether a kernel can be found, change nothing
-#     copy-kernel <target-root>    copy it in
+#     copy-kernel --check <root>   say whether a kernel can be found
+#     copy-kernel <root>           put it in place
 #
-# Runs in the live system, not the target, because the medium is not visible
-# inside the chroot. Calamares passes the target's mount point as $1.
+# With --check before the disk is touched, <root> is the live system, which
+# carries the same file the target will get.
 set -uo pipefail
 
-MOUNTED=""
-cleanup() { [[ -n $MOUNTED ]] && umount "$MOUNTED" 2>/dev/null; }
-trap cleanup EXIT
+MODE=copy
+if [[ ${1:-} == --check ]]; then MODE=check; shift; fi
+ROOT="${1:-/}"
 
-# Where the running medium is mounted, if it still is. install_dir is a profile
-# setting, so glob rather than hard-code "arch".
-find_kernel() {
-    local k
-    for k in /run/archiso/bootmnt/*/boot/x86_64/vmlinuz-linux; do
-        [[ -f $k ]] && { printf '%s\n' "$k"; return 0; }
-    done
+shopt -s nullglob
+kernels=("$ROOT"/usr/lib/modules/*/vmlinuz)
+shopt -u nullglob
 
-    # Not mounted. Booting with copytoram unmounts the medium once the squashfs
-    # has been copied into memory, and there are other ways to end up here —
-    # the medium is still attached either way, so find it by its label and
-    # mount it somewhere harmless.
-    local label dev
-    label="$(sed -n 's/.*archisolabel=\([^ ]*\).*/\1/p' /proc/cmdline)"
-    [[ -n $label ]] || return 1
-    dev="/dev/disk/by-label/$label"
-    [[ -b $dev ]] || return 1
-
-    MOUNTED="$(mktemp -d)"
-    mount -o ro "$dev" "$MOUNTED" 2>/dev/null || { rmdir "$MOUNTED"; MOUNTED=""; return 1; }
-    for k in "$MOUNTED"/*/boot/x86_64/vmlinuz-linux; do
-        [[ -f $k ]] && { printf '%s\n' "$k"; return 0; }
-    done
-    return 1
-}
-
-KERNEL="$(find_kernel)" || {
-    echo "  no kernel found on the install medium"
-    echo "  looked in /run/archiso/bootmnt and on the device labelled" \
-         "$(sed -n 's/.*archisolabel=\([^ ]*\).*/\1/p' /proc/cmdline)"
+if [[ ${#kernels[@]} -eq 0 ]]; then
+    echo "  no kernel under $ROOT/usr/lib/modules/*/vmlinuz"
+    echo "  the linux package installs one there; without it there is nothing to boot"
     exit 1
-}
+fi
 
-if [[ ${1:-} == --check ]]; then
-    echo "  kernel available: $KERNEL"
+# More than one kernel is possible (linux and linux-lts, say). Prefer the one
+# matching what the medium is running, and otherwise take the newest.
+KERNEL=""
+for k in "${kernels[@]}"; do
+    [[ $k == */$(uname -r)/vmlinuz ]] && KERNEL="$k"
+done
+[[ -n $KERNEL ]] || KERNEL="$(printf '%s\n' "${kernels[@]}" | sort -V | tail -1)"
+
+if [[ $MODE == check ]]; then
+    echo "  kernel available: ${KERNEL#"$ROOT"}"
     exit 0
 fi
 
-TARGET="${1:?usage: copy-kernel <target-root>}"
-[[ -d $TARGET ]] || { echo "  target $TARGET does not exist"; exit 1; }
-
-install -d "$TARGET/boot"
-cp -f "$KERNEL" "$TARGET/boot/vmlinuz-linux" || exit 1
-echo "  installed vmlinuz-linux from $KERNEL"
-
-# Microcode, if this medium carries it. The bootloader module picks it up only
-# when the file is there, so a missing one is not an error.
-for img in intel-ucode.img amd-ucode.img; do
-    src="${KERNEL%/x86_64/vmlinuz-linux}/$img"
-    if [[ -f $src ]]; then
-        cp -f "$src" "$TARGET/boot/$img" && echo "  installed $img"
-    fi
-done
+[[ -d $ROOT ]] || { echo "  target $ROOT does not exist"; exit 1; }
+install -d "$ROOT/boot"
+cp -f "$KERNEL" "$ROOT/boot/vmlinuz-linux" || exit 1
+echo "  installed /boot/vmlinuz-linux from ${KERNEL#"$ROOT"}"

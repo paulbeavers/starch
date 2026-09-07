@@ -312,6 +312,36 @@ end)
 EOF
 ok "desktop configuration deployed for '${LIVE_USER}'"
 
+# Render the theme, which the configuration does not carry ready-made.
+#
+# waybar's style.css imports colors.css, kitty includes colors.conf, and
+# theme.lua requires colors.lua — none of which exist until a theme is applied.
+# On an installed system install.sh does that. Copying the configuration alone
+# is not enough: without it waybar exits at startup with "Failed to import
+# colors.css", which takes the tray with it and leaves nm-applet running with
+# nowhere to draw. No bar, and no way to join a wifi network.
+#
+# The defaults come from install.sh so the medium and the installed system
+# cannot disagree about what starch looks like.
+eval "$(grep -E '^DEFAULT_(THEME|WALLPAPER)=' "$REPO/install.sh")"
+live_cfg="$AIR/home/${LIVE_USER}/.config"
+
+if XDG_CONFIG_HOME="$live_cfg" \
+   bash "$REPO/config/hypr/scripts/theme.sh" --no-reload --set "$DEFAULT_THEME" >/dev/null 2>&1; then
+    ok "theme rendered ($DEFAULT_THEME)"
+else
+    die "could not render the $DEFAULT_THEME theme; waybar would not start"
+fi
+
+# And a wallpaper, for the same reason: hyprpaper.conf names a file that only
+# exists once one has been chosen.
+if [[ -f $DEFAULT_WALLPAPER ]] && XDG_CONFIG_HOME="$live_cfg" \
+   bash "$REPO/config/hypr/scripts/wallpaper.sh" --no-reload --set "$DEFAULT_WALLPAPER" >/dev/null 2>&1; then
+    ok "wallpaper set ($(basename "$DEFAULT_WALLPAPER"))"
+else
+    warn "no wallpaper on the medium; the desktop will come up plain"
+fi
+
 # Networking on the medium, to match the desktop rather than archiso.
 #
 # releng enables iwd and systemd-networkd. The desktop expects NetworkManager —

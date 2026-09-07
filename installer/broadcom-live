@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Put the right Broadcom wireless driver in charge, in the live session.
+#
+# The installed system gets this from install.sh, which writes a modprobe
+# blacklist while configuring the desktop. The live medium cannot: it has to
+# work on hardware it only meets at boot, and by the time anything runs the
+# kernel has already bound whatever driver claimed the card first.
+#
+# So this looks at what is actually there, and only acts on the cards where the
+# in-kernel drivers are the wrong answer. Everything else is left alone —
+# brcmfmac handles most modern Broadcom parts perfectly well, and blacklisting
+# it wholesale would break wifi on the machines that are currently fine.
+#
+# Runs once at boot, before the network daemons start.
+set -uo pipefail
+
+# The same list install.sh uses. Cards the in-kernel drivers cannot drive, or
+# drive worse than the proprietary wl module.
+#   43a0 BCM4360 (2013 retina MacBook Pro)   4331 BCM4331 (older MacBook Pro)
+#   43b1 BCM4352   43ba BCM43602   43a3 BCM4350
+#   432b BCM4322   4353 BCM43224   4315 BCM4312
+WL_IDS=(0x43a0 0x4331 0x43b1 0x43ba 0x43a3 0x432b 0x4353 0x4315)
+
+found=""
+for dev in /sys/bus/pci/devices/*; do
+    [[ -r $dev/vendor && -r $dev/device ]] || continue
+    [[ "$(cat "$dev/vendor")" == 0x14e4 ]] || continue
+    id="$(cat "$dev/device")"
+    for want in "${WL_IDS[@]}"; do
+        [[ $id == "$want" ]] && { found="$id"; break 2; }
+    done
+done
+
+[[ -n $found ]] || exit 0
+
+logger -t starch-broadcom "Broadcom ${found#0x} needs the wl driver; switching"
+
+# For any later boot of this medium, and so the state is visible.
+cat > /etc/modprobe.d/starch-broadcom.conf <<'CONF'
+# Written at boot by starch: this machine has a Broadcom card the in-kernel
+# drivers cannot drive. bcma and ssb are the buses they attach through.
+blacklist b43
+blacklist bcma
+blacklist brcmsmac
+blacklist brcmfmac
+blacklist ssb
+CONF
+
+# The blacklist only governs what loads next. Something has very likely bound
+# the card already, and it has to let go before wl can take it.
+for mod in brcmfmac brcmsmac b43 bcma ssb; do
+    modprobe -r "$mod" 2>/dev/null || true
+done
+
+modprobe wl 2>/dev/null \
+    || logger -t starch-broadcom "wl would not load; wireless will not work here"

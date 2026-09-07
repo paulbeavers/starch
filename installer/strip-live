@@ -84,12 +84,19 @@ say "disabling services that were only enabled for the live image"
 # /etc/systemd/system/dbus-org.freedesktop.network1.service still had it
 # reporting "enabled". systemctl knows about Alias= and Also= and takes the
 # whole set. --no-reload because there is no manager listening in a chroot.
+# starch-broadcom.service belongs to the medium: it works the wireless driver
+# out at boot because the medium cannot know the hardware in advance. The
+# installed system has no such problem — install.sh writes the blacklist while
+# configuring the desktop, from the same detection — so the service goes, and
+# the file it may have written is left, because it is the right one.
 for unit in sshd.service iwd.service systemd-networkd.service \
             systemd-networkd.socket systemd-networkd-wait-online.service \
             choose-mirror.service pacman-init.service \
-            livecd-talk.service livecd-alsa-unmuter.service; do
+            livecd-talk.service livecd-alsa-unmuter.service \
+            starch-broadcom.service; do
     systemctl disable --no-reload "$unit" >/dev/null 2>&1 || true
 done
+rm -f /etc/systemd/system/starch-broadcom.service
 rm -f /etc/systemd/network/*.network
 
 # systemd-resolved stays enabled on purpose: /etc/resolv.conf is a symlink to

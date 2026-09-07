@@ -258,111 +258,31 @@ EOF
 
 install -d "$AIR/home/${LIVE_USER}"
 cat > "$AIR/home/${LIVE_USER}/.bash_profile" <<'EOF'
-# Install media: tty1 brings up the desktop, which starts the installer itself.
-# Any other VT is a plain shell, which matters when the desktop is the thing
-# that is broken.
+# Install media: tty1 brings up Calamares. Any other VT is a plain shell, which
+# matters when the installer is the thing that is broken.
 #
-# Running the real desktop rather than a kiosk is what gives the live session a
-# network applet, a terminal and a file manager — none of which a single
-# fullscreen Calamares has. Someone can join a wifi network, check their
-# hardware works, and then install; on a laptop whose wireless needs a driver
-# the kernel does not carry, that is the difference between a usable medium and
-# one that can only be used offline.
+# cage is a kiosk compositor — it runs one application full screen and exits
+# when that application does, so there is no desktop to get lost in and nothing
+# to shut down afterwards. Calamares partitions disks, so it runs as root, and
+# so does the compositor holding its window.
 #
-# STARCH_SHELL guards against re-entry: the text menu's Shell option runs a
-# login shell, which reads this file.
+# Quitting Calamares drops to the text menu behind it, which still has the
+# advanced install, a shell, the boot log and reboot.
+#
+# STARCH_SHELL guards against re-entry. The menu's Shell option runs a login
+# shell, which reads this file — without the guard it execs straight back into
+# the installer and the menu appears to ignore the choice.
 if [[ $XDG_VTNR == 1 && -z ${STARCH_SHELL:-} ]]; then
-    # Not exec: if the desktop will not start — no GPU it can use, a broken
-    # config — falling through to the text installer is the difference between
-    # a usable medium and a blank screen. It is also where you land after
-    # logging out.
-    # Pick a scale for whatever display this turned out to be, before the
-    # compositor reads its configuration. Hyprland's own "auto" resolves to 1x
-    # on the panels that most need scaling, which is how the installer ended up
-    # unreadably small on a retina laptop.
-    /usr/local/lib/starch/live-scale || true
-    uwsm start -- hyprland-uwsm.desktop
+    # cage does not scale, so on a high-density panel Calamares would render at
+    # 1x and be unreadable. Qt takes QT_SCALE_FACTOR; live-scale works out what
+    # this display wants from its physical size.
+    scale="$(/usr/local/lib/starch/live-scale 2>/dev/null || echo 1)"
+    sudo -E env QT_SCALE_FACTOR="$scale" cage -- calamares -D6 \
+        2>>/tmp/calamares-session.log
     exec starch-install
 fi
 EOF
-ok "tty1 starts the desktop"
-
-# The live user's copy of the desktop configuration. An installed system gets
-# this from install.sh; the medium cannot, because install.sh runs against the
-# target, so it is laid down here at build time.
-install -d "$AIR/home/${LIVE_USER}/.config"
-cp -r "$REPO/config/." "$AIR/home/${LIVE_USER}/.config/"
-
-# And the piece that only belongs on the medium: start the installer once the
-# desktop is up. hyprland.lua loads this if it exists and ignores it if not.
-cat > "$AIR/home/${LIVE_USER}/.config/hypr/live.lua" <<'EOF'
---------------------------------------------------------------------------------
---  Install media only
---
---  Starts the installer once the desktop is running. An installed system has
---  no live.lua, so nothing here follows anyone home.
---------------------------------------------------------------------------------
-
-hl.on("hyprland.start", function()
-    -- Calamares partitions disks, so it needs to be root. The live user has
-    -- passwordless sudo; -E keeps the Wayland environment, without which a Qt
-    -- application started as another user has no display to draw on.
-    --
-    -- Output goes to a file because there is nowhere else for it to go: this
-    -- runs from the compositor, with no terminal attached. If the window never
-    -- appears, that log is the only thing that will say why, and the terminal
-    -- is one keystroke away.
-    hl.exec_cmd("sh -c 'sudo -E calamares >/tmp/calamares.log 2>&1'")
-end)
-EOF
-ok "desktop configuration deployed for '${LIVE_USER}'"
-
-# Render the theme, which the configuration does not carry ready-made.
-#
-# waybar's style.css imports colors.css, kitty includes colors.conf, and
-# theme.lua requires colors.lua — none of which exist until a theme is applied.
-# On an installed system install.sh does that. Copying the configuration alone
-# is not enough: without it waybar exits at startup with "Failed to import
-# colors.css", which takes the tray with it and leaves nm-applet running with
-# nowhere to draw. No bar, and no way to join a wifi network.
-#
-# The defaults come from install.sh so the medium and the installed system
-# cannot disagree about what starch looks like.
-eval "$(grep -E '^DEFAULT_(THEME|WALLPAPER)=' "$REPO/install.sh")"
-live_cfg="$AIR/home/${LIVE_USER}/.config"
-
-if XDG_CONFIG_HOME="$live_cfg" \
-   bash "$REPO/config/hypr/scripts/theme.sh" --no-reload --set "$DEFAULT_THEME" >/dev/null 2>&1; then
-    ok "theme rendered ($DEFAULT_THEME)"
-else
-    die "could not render the $DEFAULT_THEME theme; waybar would not start"
-fi
-
-# And a wallpaper, for the same reason: hyprpaper.conf names a file that only
-# exists once one has been chosen.
-if [[ -f $DEFAULT_WALLPAPER ]] && XDG_CONFIG_HOME="$live_cfg" \
-   bash "$REPO/config/hypr/scripts/wallpaper.sh" --no-reload --set "$DEFAULT_WALLPAPER" >/dev/null 2>&1; then
-    ok "wallpaper set ($(basename "$DEFAULT_WALLPAPER"))"
-else
-    warn "no wallpaper on the medium; the desktop will come up plain"
-fi
-
-# Networking on the medium, to match the desktop rather than archiso.
-#
-# releng enables iwd and systemd-networkd. The desktop expects NetworkManager —
-# waybar's network module and nm-applet both talk to it — and two managers
-# fighting over one interface is worse than either alone. So the medium is
-# switched over to match what it is running, which also means the wifi someone
-# joins in the live session is joined the same way it will be after installing.
-rm -f "$AIR/etc/systemd/system/multi-user.target.wants/iwd.service" \
-      "$AIR/etc/systemd/system/multi-user.target.wants/systemd-networkd.service" \
-      "$AIR/etc/systemd/system/sockets.target.wants/systemd-networkd.socket" \
-      "$AIR/etc/systemd/system/network-online.target.wants/systemd-networkd-wait-online.service"
-rm -f "$AIR/etc/systemd/network/"*.network
-install -d "$AIR/etc/systemd/system/multi-user.target.wants"
-ln -sf /usr/lib/systemd/system/NetworkManager.service \
-    "$AIR/etc/systemd/system/multi-user.target.wants/NetworkManager.service"
-ok "NetworkManager runs the medium's networking"
+ok "tty1 opens Calamares under cage, menu behind it"
 
 # ── Calamares ─────────────────────────────────────────────────────────────────
 install -d "$AIR/etc/calamares/modules" "$AIR/etc/calamares/branding/starch"

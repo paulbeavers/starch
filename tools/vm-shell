@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""A shell in a running QEMU guest, over user-mode networking.
+
+Screenshotting a terminal and reading it back is slow and lossy. QEMU's user
+networking puts the host at 10.0.2.2, so the guest can reach a server here
+without any port forwarding being set up. Type this into the guest once, by
+hand or with vm-keys:
+
+    curl -s http://10.0.2.2:8099/agent.sh | bash &
+
+After that, drive it from the host:
+
+    ./tools/vm-shell serve            # leave running in one terminal
+    ./tools/vm-shell run 'hyprctl monitors'
+
+The agent polls /cmd, evaluates what it gets and POSTs the output to /out.
+This is a debugging aid for a VM you built and booted yourself; it is not
+authenticated and has no business on a network you share.
+"""
+
+import http.server
+import os
+import socketserver
+import sys
+import time
+
+PORT = 8099
+STATE = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "starch-vm-shell")
+
+AGENT = """#!/bin/bash
+while true; do
+  c=$(curl -s --max-time 5 http://10.0.2.2:%d/cmd)
+  if [ -n "$c" ]; then
+    o=$(eval "$c" 2>&1)
+    curl -s --max-time 10 --data-binary "$o" http://10.0.2.2:%d/out >/dev/null
+  fi
+  sleep 1
+done
+""" % (PORT, PORT)
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def _send(self, body):
+        data = body.encode() if isinstance(body, str) else body
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        if self.path == "/agent.sh":
+            return self._send(AGENT)
+        if self.path == "/cmd":
+            path = os.path.join(STATE, "cmd")
+            if os.path.exists(path):
+                with open(path) as handle:
+                    command = handle.read()
+                os.remove(path)
+                return self._send(command)
+        return self._send("")
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        with open(os.path.join(STATE, "out"), "wb") as handle:
+            handle.write(self.rfile.read(length))
+        self._send("ok")
+
+
+def serve():
+    os.makedirs(STATE, exist_ok=True)
+    socketserver.TCPServer.allow_reuse_address = True
+    with socketserver.TCPServer(("0.0.0.0", PORT), Handler) as server:
+        print(f"listening on {PORT}; in the guest run:")
+        print(f"  curl -s http://10.0.2.2:{PORT}/agent.sh | bash &")
+        server.serve_forever()
+
+
+def run(command, timeout=20.0):
+    os.makedirs(STATE, exist_ok=True)
+    out = os.path.join(STATE, "out")
+    if os.path.exists(out):
+        os.remove(out)
+    with open(os.path.join(STATE, "cmd"), "w") as handle:
+        handle.write(command)
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.exists(out):
+            with open(out) as handle:
+                sys.stdout.write(handle.read())
+            return 0
+        time.sleep(0.25)
+    print("no answer from the guest — is the agent running there?", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2 or sys.argv[1] not in ("serve", "run"):
+        print(__doc__)
+        sys.exit(2)
+    if sys.argv[1] == "serve":
+        serve()
+    else:
+        sys.exit(run(" ".join(sys.argv[2:])))

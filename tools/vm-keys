@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""Talk to a QEMU HMP monitor over a unix socket: type text, dump the screen."""
+import socket, sys, time
+
+SOCK = sys.argv[1]
+KEYMAP = {' ': 'spc', '/': 'slash', '.': 'dot', '-': 'minus', ';': 'semicolon',
+          '=': 'equal', ',': 'comma', "'": 'apostrophe', '\\': 'backslash',
+          '[': 'bracket_left', ']': 'bracket_right', '`': 'grave_accent'}
+SHIFTED = {'!': '1', '@': '2', '#': '3', '$': '4', '%': '5', '^': '6', '&': '7',
+           '*': '8', '(': '9', ')': '0', '_': 'minus', '+': 'equal', ':': 'semicolon',
+           '"': 'apostrophe', '<': 'comma', '>': 'dot', '?': 'slash', '|': 'backslash',
+           '~': 'grave_accent', '{': 'bracket_left', '}': 'bracket_right'}
+
+def connect():
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(SOCK); s.settimeout(5); time.sleep(0.3)
+    try: s.recv(65536)
+    except Exception: pass
+    return s
+
+def cmd(s, line, pause=0.02):
+    s.sendall((line + '\n').encode()); time.sleep(pause)
+    try: return s.recv(65536).decode(errors='replace')
+    except Exception: return ''
+
+def keys_for(ch):
+    if ch in KEYMAP: return KEYMAP[ch]
+    if ch in SHIFTED: return 'shift-' + SHIFTED[ch]
+    if ch.isupper(): return 'shift-' + ch.lower()
+    if ch.isalnum(): return ch
+    raise ValueError(f'no key mapping for {ch!r}')
+
+if __name__ == '__main__':
+    action = sys.argv[2]
+    s = connect()
+    if action == 'type':
+        for ch in sys.argv[3]: cmd(s, f'sendkey {keys_for(ch)}', 0.035)
+    elif action == 'key':
+        for k in sys.argv[3:]: cmd(s, f'sendkey {k}', 0.08)
+    elif action == 'screendump':
+        cmd(s, f'screendump {sys.argv[3]}', 1.5)
+    elif action == 'raw':
+        out = cmd(s, ' '.join(sys.argv[3:]), 0.6)
+        print('\n'.join(l for l in out.splitlines() if '\x1b' not in l))
+    s.close()

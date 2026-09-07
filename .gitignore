@@ -8,3 +8,12 @@
 /localrepo/
 /.build-aur/
 /.build-calamares/
+
+# Python bytecode from tools/.
+__pycache__/
+*.pyc
+
+# Built by tools/vm-click/Makefile.
+tools/vm-click/click
+tools/vm-click/vp.c
+tools/vm-click/vp-client.h

@@ -187,9 +187,14 @@ AIR="$PROFILE/airootfs"
 # installed machine, and the point of starch is that nothing of it remains.
 DEST="$AIR/usr/local/share/hyprland-setup"
 install -d "$DEST"
-for item in install.sh README.md config; do
+for item in install.sh README.md config starch-config; do
     cp -r "$REPO/$item" "$DEST/"
 done
+
+# Python bytecode from running the settings app out of a checkout. It is
+# regenerated on first run and it names paths that will not exist here, so it
+# is dead weight in the squashfs at best.
+find "$DEST" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
 
 # The payload is source, so anything near a megabyte means something large got
 # swept in — exactly the failure this replaced.
@@ -347,6 +352,7 @@ s = pd.read_text()
 extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
   ["/usr/local/bin/starch-setup"]="0:0:755"
   ["/usr/local/share/hyprland-setup/install.sh"]="0:0:755"
+  ["/usr/local/share/hyprland-setup/starch-config/starch-config"]="0:0:755"
   ["/usr/local/lib/starch/add-microcode"]="0:0:755"
   ["/usr/local/lib/starch/live-scale"]="0:0:755"
   ["/usr/local/lib/starch/broadcom-live"]="0:0:755"

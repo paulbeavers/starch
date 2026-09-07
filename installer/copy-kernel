@@ -4,39 +4,78 @@
 # mkarchiso empties /boot in the squashfs before packaging it ("Delete all
 # files in /boot"), because the live medium boots its kernel from the ISO
 # filesystem rather than from the image. Copying that image onto a disk
-# therefore produces a system with the linux package installed according to
-# pacman, and no kernel on disk — mkinitcpio then fails with
+# therefore produces a system that pacman believes has the linux package
+# installed and that has no kernel on disk. Without this, mkinitcpio fails with
 #
 #     ERROR: Invalid option -k -- '/boot/vmlinuz-linux' must be readable
 #
 # and even if it did not, there would be nothing for the bootloader to boot.
 #
-# Only the kernel is taken. The initramfs beside it on the medium is the
-# archiso one, built to find a squashfs on removable media and roughly 250MB of
-# it; the installed system builds its own immediately after this.
+# Only the kernel is taken. The initramfs beside it on the medium is archiso's,
+# built to find a squashfs on removable media and around 250MB of it; the
+# installed system builds its own immediately after this.
 #
-# Runs in the live system, not the target, because /run/archiso is not visible
+#     copy-kernel --check          say whether a kernel can be found, change nothing
+#     copy-kernel <target-root>    copy it in
+#
+# Runs in the live system, not the target, because the medium is not visible
 # inside the chroot. Calamares passes the target's mount point as $1.
 set -uo pipefail
 
-TARGET="${1:?usage: copy-kernel <target-root>}"
-BOOT=/run/archiso/bootmnt/arch/boot
+MOUNTED=""
+cleanup() { [[ -n $MOUNTED ]] && umount "$MOUNTED" 2>/dev/null; }
+trap cleanup EXIT
 
-[[ -d $TARGET ]] || { echo "  target $TARGET does not exist"; exit 1; }
+# Where the running medium is mounted, if it still is. install_dir is a profile
+# setting, so glob rather than hard-code "arch".
+find_kernel() {
+    local k
+    for k in /run/archiso/bootmnt/*/boot/x86_64/vmlinuz-linux; do
+        [[ -f $k ]] && { printf '%s\n' "$k"; return 0; }
+    done
 
-if [[ ! -f $BOOT/x86_64/vmlinuz-linux ]]; then
-    echo "  no kernel at $BOOT/x86_64/vmlinuz-linux"
+    # Not mounted. Booting with copytoram unmounts the medium once the squashfs
+    # has been copied into memory, and there are other ways to end up here —
+    # the medium is still attached either way, so find it by its label and
+    # mount it somewhere harmless.
+    local label dev
+    label="$(sed -n 's/.*archisolabel=\([^ ]*\).*/\1/p' /proc/cmdline)"
+    [[ -n $label ]] || return 1
+    dev="/dev/disk/by-label/$label"
+    [[ -b $dev ]] || return 1
+
+    MOUNTED="$(mktemp -d)"
+    mount -o ro "$dev" "$MOUNTED" 2>/dev/null || { rmdir "$MOUNTED"; MOUNTED=""; return 1; }
+    for k in "$MOUNTED"/*/boot/x86_64/vmlinuz-linux; do
+        [[ -f $k ]] && { printf '%s\n' "$k"; return 0; }
+    done
+    return 1
+}
+
+KERNEL="$(find_kernel)" || {
+    echo "  no kernel found on the install medium"
+    echo "  looked in /run/archiso/bootmnt and on the device labelled" \
+         "$(sed -n 's/.*archisolabel=\([^ ]*\).*/\1/p' /proc/cmdline)"
     exit 1
+}
+
+if [[ ${1:-} == --check ]]; then
+    echo "  kernel available: $KERNEL"
+    exit 0
 fi
 
+TARGET="${1:?usage: copy-kernel <target-root>}"
+[[ -d $TARGET ]] || { echo "  target $TARGET does not exist"; exit 1; }
+
 install -d "$TARGET/boot"
-cp -f "$BOOT/x86_64/vmlinuz-linux" "$TARGET/boot/vmlinuz-linux" || exit 1
-echo "  installed vmlinuz-linux"
+cp -f "$KERNEL" "$TARGET/boot/vmlinuz-linux" || exit 1
+echo "  installed vmlinuz-linux from $KERNEL"
 
 # Microcode, if this medium carries it. The bootloader module picks it up only
 # when the file is there, so a missing one is not an error.
 for img in intel-ucode.img amd-ucode.img; do
-    if [[ -f "$BOOT/$img" ]]; then
-        cp -f "$BOOT/$img" "$TARGET/boot/$img" && echo "  installed $img"
+    src="${KERNEL%/x86_64/vmlinuz-linux}/$img"
+    if [[ -f $src ]]; then
+        cp -f "$src" "$TARGET/boot/$img" && echo "  installed $img"
     fi
 done

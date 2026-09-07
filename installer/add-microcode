@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Get microcode back into the initramfs.
+#
+# intel-ucode and amd-ucode put their early-load images in /boot, and mkarchiso
+# empties /boot when it packages the image — so an install that copies the
+# image gets the packages without the images, and boots with no microcode
+# updates at all. Nothing complains; it is simply missing.
+#
+# The raw microcode survives, because those packages also ship it under
+# /usr/lib/firmware/{intel,amd}-ucode/, which mkarchiso does not touch. That is
+# exactly where mkinitcpio's "microcode" hook reads from, so adding the hook
+# rebuilds the microcode into the initramfs and the bootloader needs no
+# separate initrd line for it.
+#
+# Runs in the target, between the step that writes mkinitcpio.conf and the one
+# that builds the images — adding it earlier would be overwritten.
+set -uo pipefail
+
+CONF="${CONF:-/etc/mkinitcpio.conf}"
+
+[[ -f $CONF ]] || { echo "  $CONF is missing"; exit 0; }
+
+if grep -qE '^HOOKS=.*\bmicrocode\b' "$CONF"; then
+    echo "  microcode hook already present"
+    exit 0
+fi
+
+# Immediately after "base", where mkinitcpio's own documentation puts it: it
+# has to run before udev and modconf so the CPU is updated before anything
+# else looks at it.
+if ! grep -qE '^HOOKS=' "$CONF"; then
+    echo "  no HOOKS line in $CONF; leaving it alone"
+    exit 0
+fi
+
+sed -i -E 's/^(HOOKS=\([^)]*\bbase\b)/\1 microcode/' "$CONF"
+
+if grep -qE '^HOOKS=.*\bmicrocode\b' "$CONF"; then
+    echo "  added the microcode hook: $(grep -E '^HOOKS=' "$CONF")"
+else
+    echo "  could not add the microcode hook to: $(grep -E '^HOOKS=' "$CONF")"
+    exit 0   # not worth failing an install over
+fi

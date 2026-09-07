@@ -107,6 +107,25 @@ rm -f /etc/systemd/network/*.network
 # ConditionVirtualization-gated, so on real hardware they do nothing, and in a
 # VM they are what the user would have had to install by hand.
 
+say "initialising the pacman keyring"
+# On the medium /etc/pacman.d/gnupg is a tmpfs that pacman-init.service fills
+# at boot with pacman-key --init and --populate. A tmpfs is not part of the
+# squashfs, so copying the image copies the empty directory underneath it and
+# the installed system has no keyring at all. Every package then fails its
+# signature check — "unknown trust", for any package, which leaves a machine
+# that cannot install or update anything.
+#
+# Not fatal if it fails: the system still boots, and two commands fix it. An
+# aborted install at this point would leave a wiped disk and nothing on it.
+rm -rf /etc/pacman.d/gnupg
+if pacman-key --init >/dev/null 2>&1 && pacman-key --populate >/dev/null 2>&1; then
+    say "  keyring initialised"
+else
+    say "  WARNING: the keyring could not be initialised."
+    say "  Packages will not verify until you run, as root:"
+    say "      rm -rf /etc/pacman.d/gnupg && pacman-key --init && pacman-key --populate"
+fi
+
 say "restoring a normal boot"
 systemctl set-default graphical.target 2>/dev/null || true
 

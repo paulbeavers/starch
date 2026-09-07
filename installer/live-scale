@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Choose a display scale for the live session, before the desktop starts.
+#
+# An installed system gets monitors.lua from install.sh, which measures the
+# display it is being installed onto. The medium has no such file: it meets the
+# display for the first time at boot, and Hyprland's own "auto" scale resolves
+# to 1x on the panels that most need scaling. On a retina MacBook that means an
+# installer rendered at 2880x1800 with 1x text — legible only if you lean in.
+#
+# The decision is on density, not resolution. A 5120-wide desktop monitor and a
+# 2880-wide laptop panel are both "big numbers" and want opposite things: the
+# first is about 160dpi and looks absurd doubled, the second is about 220dpi and
+# is unreadable left alone. EDID carries the physical size, so ask.
+set -uo pipefail
+
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}/hypr"
+OUT="$CFG/monitors.lua"
+
+# Do not overwrite a file someone has already put here by hand.
+[[ -e $OUT ]] && exit 0
+
+width=0 dpi=0
+for modes in /sys/class/drm/card*-*/modes; do
+    [[ -r $modes ]] || continue
+    conn="${modes%/modes}"
+    [[ -r $conn/status && "$(cat "$conn/status")" == connected ]] || continue
+
+    res="$(head -1 "$modes")"
+    w="${res%%x*}"
+    [[ $w =~ ^[0-9]+$ ]] || continue
+    (( w > width )) && width=$w
+
+    # EDID byte 21 is the horizontal image size in centimetres. Zero means the
+    # display did not say, which projectors and some virtual outputs do.
+    cm=0
+    if [[ -r $conn/edid ]]; then
+        cm=$(od -An -tu1 -j21 -N1 "$conn/edid" 2>/dev/null | tr -d ' ')
+        [[ $cm =~ ^[0-9]+$ ]] || cm=0
+    fi
+    if (( cm > 0 )); then
+        # inches = cm / 2.54, so dpi = px * 254 / (cm * 100).
+        d=$(( w * 254 / (cm * 100) ))
+        (( d > dpi )) && dpi=$d
+    fi
+done
+
+if (( dpi >= 180 )); then
+    scale=2              # retina-class: a MacBook panel is around 220
+elif (( dpi >= 130 )); then
+    scale=1.3333334      # the same scale install.sh defaults to, so the
+                         # installer and the installed desktop match
+elif (( dpi > 0 )); then
+    scale=1
+elif (( width >= 2560 )); then
+    scale=2            # no EDID to go on; fall back to the resolution
+else
+    scale=1
+fi
+
+mkdir -p "$CFG"
+cat > "$OUT" <<LUA
+-- Written at boot by the install medium, for the display it found.
+--
+-- Widest connected mode ${width}px at about ${dpi}dpi, so scale ${scale}.
+-- An installed system replaces this with one install.sh measured properly.
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = ${scale} })
+LUA

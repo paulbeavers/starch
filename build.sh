@@ -276,6 +276,11 @@ if [[ $XDG_VTNR == 1 && -z ${STARCH_SHELL:-} ]]; then
     # config — falling through to the text installer is the difference between
     # a usable medium and a blank screen. It is also where you land after
     # logging out.
+    # Pick a scale for whatever display this turned out to be, before the
+    # compositor reads its configuration. Hyprland's own "auto" resolves to 1x
+    # on the panels that most need scaling, which is how the installer ended up
+    # unreadably small on a retina laptop.
+    /usr/local/lib/starch/live-scale || true
     uwsm start -- hyprland-uwsm.desktop
     exec starch-install
 fi
@@ -370,6 +375,7 @@ ok "Calamares configuration ($(ls -1 "$HERE/calamares/modules" | wc -l) modules)
 # /usr/local/bin because they are not commands anyone should run by hand.
 install -d "$AIR/usr/local/lib/starch"
 install -m 755 "$HERE/installer/add-microcode"     "$AIR/usr/local/lib/starch/add-microcode"
+install -m 755 "$HERE/installer/live-scale"        "$AIR/usr/local/lib/starch/live-scale"
 install -m 755 "$HERE/installer/broadcom-live"     "$AIR/usr/local/lib/starch/broadcom-live"
 install -m 755 "$HERE/installer/copy-kernel"       "$AIR/usr/local/lib/starch/copy-kernel"
 install -m 755 "$HERE/installer/strip-live"        "$AIR/usr/local/lib/starch/strip-live"
@@ -422,6 +428,7 @@ extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
   ["/usr/local/bin/starch-setup"]="0:0:755"
   ["/usr/local/share/hyprland-setup/install.sh"]="0:0:755"
   ["/usr/local/lib/starch/add-microcode"]="0:0:755"
+  ["/usr/local/lib/starch/live-scale"]="0:0:755"
   ["/usr/local/lib/starch/broadcom-live"]="0:0:755"
   ["/usr/local/lib/starch/copy-kernel"]="0:0:755"
   ["/usr/local/lib/starch/strip-live"]="0:0:755"

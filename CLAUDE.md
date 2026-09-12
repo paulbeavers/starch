@@ -19,10 +19,18 @@ change `starch/hyprland-setup`; the build reads the latter.
 
 ## Build
 
-`sudo ./build.sh` — about 5 minutes with a warm pacman cache. `./build.sh
---assemble` builds the profile with no root in seconds, which is the cheap way
-to check what would go on the medium: diff `work-assemble/profile` against
-`/usr/share/archiso/configs/releng`.
+`./build-all.sh` from a clean clone: it checks out the submodule, builds the
+AUR packages and then the ISO, in that order. `sudo ./build.sh` alone is about
+5 minutes with a warm pacman cache. `./build.sh --assemble` builds the profile
+with no root in seconds, which is the cheap way to check what would go on the
+medium: diff `work-assemble/profile` against `/usr/share/archiso/configs/releng`.
+
+**Calamares is patched.** `tools/build-aur.sh` removes `packagechooser` from
+the AUR recipe's `SKIP_MODULES`, because `settings.conf` uses it for the
+"Enable SSHD" checkbox. An ISO built against a Calamares from before that patch
+ships an installer that refuses to start; `build.sh` looks inside the package
+and dies rather than let that through. If you change anything about the
+installer's module set, `./tools/build-aur.sh --force` first.
 
 `extract-packages.sh` reads the `PKGS_*` arrays out of `install.sh`, so a
 package added there lands on the ISO too. Never maintain a second list.

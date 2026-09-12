@@ -67,20 +67,37 @@ git add hyprland-setup && git commit -m "Bump hyprland-setup"
 
 ```bash
 sudo pacman -S archiso base-devel   # once
-./tools/build-aur.sh                # once: builds Calamares, ~20 minutes
-sudo ./build.sh                     # ~3GB, 20-40 minutes
+./build-all.sh                      # everything, in the right order
 ```
 
-`tools/build-aur.sh` is not optional and is easy to miss. Two packages are not
-in the official repositories — Calamares itself, and the Broadcom bluetooth
-firmware — and `mkarchiso` installs from repositories, not from files. So they
-are built once into `localrepo/`, which `build.sh` adds to the profile's
-pacman.conf. `localrepo/` is gitignored, because it holds built packages rather
-than source: a fresh clone has to run this before the first build. `build.sh`
-refuses to start without it and names what is missing.
+`build-all.sh` runs the two builds in order and stops at the first failure. It
+also checks out the `hyprland-setup` submodule if you cloned without
+`--recurse-submodules`. Run it as yourself: `makepkg` refuses to run as root,
+so the script calls `sudo` for the ISO step alone and asks then.
 
-It skips anything already built. Rebuilding Calamares takes twenty minutes and
-nothing about it changes between ISOs; `--force` rebuilds anyway.
+```bash
+./build-all.sh --check        # say what would happen, build nothing
+./build-all.sh --force-aur    # rebuild Calamares too
+./build-all.sh --no-iso       # stop after the AUR packages
+```
+
+The order matters more than it looks. Two packages are not in the official
+repositories — Calamares itself, and the Broadcom bluetooth firmware — and
+`mkarchiso` installs from repositories, not from files, so they are built first
+into `localrepo/`, which `build.sh` adds to the profile's pacman.conf.
+`localrepo/` is gitignored because it holds built packages rather than source,
+so a fresh clone has to build them before its first ISO.
+
+Calamares in particular must be the *current* one. starch patches its recipe to
+build the `packagechooser` module, which the AUR recipe skips and which
+`settings.conf` depends on for the "Enable SSHD" checkbox. An ISO built against
+a Calamares from before that patch carries an installer that refuses to start —
+so `build.sh` looks inside the package and refuses to assemble rather than let
+you find out after burning a stick.
+
+Rebuilding Calamares takes twenty minutes and nothing about it changes between
+ISOs, so both scripts skip it when it is already built; `--force-aur` rebuilds
+anyway.
 
 Everything else — including, perhaps surprisingly, `broadcom-wl-dkms` — comes
 from the official repositories.

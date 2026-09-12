@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Put `quiet splash` on the installed system's kernel command line.
+#
+# After Calamares' bootloader module, which writes the systemd-boot entries;
+# there is nothing to edit before it runs. The live medium gets the same
+# arguments from build.sh, but those live on the ISO and do not come across
+# with the filesystem, so the installed system has to be told separately.
+#
+# Escape still switches to the text at any point during the boot. That is
+# Plymouth's own behaviour, and the reason this is a splash rather than just
+# `quiet`: a boot that fails stays diagnosable without a rescue disk.
+#
+# Runs inside the target with Calamares' chroot.
+set -uo pipefail
+
+ARGS="quiet splash loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0"
+changed=0
+
+# systemd-boot: one file per entry, the kernel arguments on an `options` line.
+shopt -s nullglob
+for entry in /boot/loader/entries/*.conf; do
+    grep -q '^options ' "$entry" || continue
+    grep -qE '^options .*\bsplash\b' "$entry" && continue
+    sed -i -E "s|^(options .*)$|\1 $ARGS|" "$entry"
+    echo "  $(basename "$entry")"
+    changed=$((changed + 1))
+done
+
+# GRUB, if this ever installs one: the same arguments, in its own file, and
+# the config has to be regenerated for them to reach a boot.
+if [[ -f /etc/default/grub ]] && command -v grub-mkconfig >/dev/null; then
+    if ! grep -qE '^GRUB_CMDLINE_LINUX_DEFAULT=.*\bsplash\b' /etc/default/grub; then
+        sed -i -E "s|^(GRUB_CMDLINE_LINUX_DEFAULT=\")(.*)(\")|\1\2 $ARGS\3|" \
+            /etc/default/grub
+        grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1 \
+            && { echo "  grub.cfg"; changed=$((changed + 1)); }
+    fi
+fi
+
+if [[ $changed -eq 0 ]]; then
+    echo "  no boot entries to edit; the splash will not show"
+else
+    echo "  splash arguments added to $changed boot entr$( ((changed==1)) && echo y || echo ies)"
+fi
+
+exit 0

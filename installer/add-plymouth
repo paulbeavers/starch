@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Add the plymouth hook to the target's initramfs.
+#
+# Timing is the whole point. Calamares' initcpiocfg writes /etc/mkinitcpio.conf
+# from scratch, so anything added before it is discarded; initcpio then builds
+# the images, so anything added after it is too late to matter. This runs
+# between the two, in the same window as add-microcode.
+#
+# Without the hook plymouthd never starts, and since the kernel command line
+# already says `quiet splash` the boot shows neither output nor splash — the
+# worst of the two, and with nothing anywhere saying why.
+#
+# Runs inside the target with Calamares' chroot.
+set -uo pipefail
+
+CONF="${CONF:-/etc/mkinitcpio.conf}"
+
+if [[ ! -f $CONF ]]; then
+    echo "  $CONF is missing; leaving the initramfs alone"
+    exit 0
+fi
+
+if grep -qE '^HOOKS=.*\bplymouth\b' "$CONF"; then
+    echo "  the plymouth hook is already there"
+    exit 0
+fi
+
+if ! grep -qE '^HOOKS=' "$CONF"; then
+    echo "  no HOOKS line in $CONF; leaving it alone"
+    exit 0
+fi
+
+# Straight after udev, which is where it has to be: plymouth needs udev to have
+# settled the DRM device and everything after it may already want to draw.
+sed -i -E 's/^(HOOKS=\([^)]*\budev\b)/\1 plymouth/' "$CONF"
+
+if grep -qE '^HOOKS=.*\bplymouth\b' "$CONF"; then
+    echo "  added the plymouth hook: $(grep -E '^HOOKS=' "$CONF")"
+else
+    echo "  could not add the plymouth hook to: $(grep -E '^HOOKS=' "$CONF")"
+fi
+
+exit 0

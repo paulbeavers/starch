@@ -177,6 +177,19 @@ sed -i \
     "$PROFILE/profiledef.sh"
 ok "branded as $ISO_NAME ($ISO_LABEL)"
 
+# The boot menu. Left alone it says "Arch Linux install medium" for fifteen
+# seconds before anything of ours appears — which is the first thing anyone
+# sees, and not what they booted. The entries are renamed and the wait cut to
+# three seconds; holding a key still stops it, and the speech entry is still
+# there for anyone who needs it.
+sed -i -E 's|^title(\s+)Arch Linux install medium|title\1starch install medium|' \
+    "$PROFILE"/efiboot/loader/entries/*.conf
+sed -i -E 's|^MENU LABEL Arch Linux install medium|MENU LABEL starch install medium|' \
+    "$PROFILE"/syslinux/*.cfg
+sed -i -E 's|^timeout[[:space:]]+[0-9]+|timeout 3|' "$PROFILE/efiboot/loader/loader.conf"
+sed -i -E 's|^TIMEOUT[[:space:]]+[0-9]+|TIMEOUT 30|' "$PROFILE"/syslinux/archiso_head.cfg
+ok "boot menu says starch, and waits 3 seconds instead of 15"
+
 # ── the repo itself, so the live session can install from it ──────────────────
 AIR="$PROFILE/airootfs"
 # An allowlist, not an exclude list. An earlier version excluded build output by

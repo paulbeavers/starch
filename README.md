@@ -70,16 +70,12 @@ sudo pacman -S archiso base-devel   # once
 ./build-all.sh                      # everything, in the right order
 ```
 
-`build-all.sh` runs the two builds in order and stops at the first failure. It
-also checks out the `hyprland-setup` submodule if you cloned without
-`--recurse-submodules`. Run it as yourself: `makepkg` refuses to run as root,
-so the script calls `sudo` for the ISO step alone and asks then.
-
-```bash
-./build-all.sh --check        # say what would happen, build nothing
-./build-all.sh --force-aur    # rebuild Calamares too
-./build-all.sh --no-iso       # stop after the AUR packages
-```
+`build-all.sh` takes no options — it runs the two builds in order and stops at
+the first failure. It also checks out the `hyprland-setup` submodule if you
+cloned without `--recurse-submodules`. Run it as yourself: `makepkg` refuses to
+run as root, so the script calls `sudo` for the ISO step alone and asks then.
+The scripts underneath keep their own options for when you need them, listed
+below.
 
 The order matters more than it looks. Two packages are not in the official
 repositories — Calamares itself, and the Broadcom bluetooth firmware — and

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Enable sshd on the installed system, because the user asked for it.
+#
+# Runs only when the "Enable SSHD" checkbox was ticked — contextualprocess
+# matches the global storage value and skips this entirely otherwise.
+#
+# It has to run after strip-live, which disables sshd along with the rest of
+# what archiso switches on for the live medium. That is the right default: an
+# installed desktop should not come up listening. This turns it back on as a
+# deliberate choice rather than an inherited accident.
+#
+# openssh is already installed — it came across with the filesystem — so there
+# is nothing to fetch and this works with no network.
+#
+# Runs inside the target with Calamares' chroot.
+set -uo pipefail
+
+if ! systemctl --root=/ list-unit-files sshd.service >/dev/null 2>&1; then
+    echo "  sshd.service is not present; nothing to enable"
+    exit 0
+fi
+
+# --no-reload because there is no manager listening in a chroot.
+if systemctl enable --no-reload sshd.service >/dev/null 2>&1; then
+    echo "  sshd will start at boot"
+else
+    echo "  could not enable sshd.service"
+fi
+
+exit 0

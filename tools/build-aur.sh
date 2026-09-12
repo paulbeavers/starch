@@ -62,6 +62,25 @@ for pkg in "${AUR_PACKAGES[@]}"; do
     fi
     ok "$(git -C "$WORK/$pkg" log -1 --format='%h %s')"
 
+    # One divergence from the AUR recipe, and only for Calamares.
+    #
+    # Its PKGBUILD passes -DSKIP_MODULES with packagechooser in the list, so
+    # the module is simply not built and Calamares has no way to put a
+    # checkbox in front of the user. starch uses one — "Enable SSHD" — so the
+    # module has to exist. Removing the two lines rather than rewriting the
+    # list keeps the patch obvious and lets the rest of the recipe move on
+    # without us.
+    #
+    # The reset --hard above means this is reapplied on every run: the clone
+    # is always back at origin/master before we touch it.
+    if [[ $pkg == calamares ]]; then
+        sed -i -E '/^\s*packagechooserq?\s*$/d' "$WORK/$pkg/PKGBUILD"
+        if grep -qE '^\s*packagechooser' "$WORK/$pkg/PKGBUILD"; then
+            die "could not un-skip packagechooser in the Calamares PKGBUILD"
+        fi
+        ok "patched: packagechooser will be built"
+    fi
+
     ( cd "$WORK/$pkg" && makepkg --syncdeps --cleanbuild --force --noconfirm ) \
         || die "$pkg failed to build. The output above says why; its PKGBUILD is in $WORK/$pkg."
 

@@ -161,17 +161,6 @@ Server = file://$LOCALREPO
 EOF
     ok "local repo wired in ($(ls -1 "$LOCALREPO"/*.pkg.tar.* 2>/dev/null | wc -l) package(s))"
 
-    # settings.conf names packagechooser, and the AUR recipe does not build it
-    # — tools/build-aur.sh patches that out. If the package in localrepo
-    # predates the patch, Calamares starts, fails to find the module and
-    # refuses the whole sequence: the installer is dead on the medium and the
-    # only clue is a log nobody reads until they have burned a stick. Cheaper
-    # to notice here.
-    cal_pkg="$(ls -t "$LOCALREPO"/calamares-*.pkg.tar.* 2>/dev/null | head -1)"
-    if [[ -n $cal_pkg ]] && grep -q "packagechooser" "$HERE/calamares/settings.conf"; then
-        bsdtar -tf "$cal_pkg" 2>/dev/null | grep -q "modules/packagechooser/" \
-            || die "$(basename "$cal_pkg") has no packagechooser module, but settings.conf uses one — rebuild it with: ./tools/build-aur.sh --force"
-    fi
 elif [[ $ASSEMBLE_ONLY -eq 1 ]]; then
     # Assembling is for inspecting the profile; not having built Calamares yet
     # is worth saying, but it is not a reason to refuse to lay the profile out.
@@ -401,7 +390,6 @@ install -m 755 "$HERE/installer/strip-live"        "$AIR/usr/local/lib/starch/st
 install -m 755 "$HERE/installer/configure-desktop" "$AIR/usr/local/lib/starch/configure-desktop"
 install -m 755 "$HERE/installer/add-plymouth"      "$AIR/usr/local/lib/starch/add-plymouth"
 install -m 755 "$HERE/installer/splash-cmdline"    "$AIR/usr/local/lib/starch/splash-cmdline"
-install -m 755 "$HERE/installer/enable-sshd"       "$AIR/usr/local/lib/starch/enable-sshd"
 install -m 755 "$HERE/installer/installer-session" "$AIR/usr/local/lib/starch/installer-session"
 ok "post-install scripts staged"
 
@@ -459,7 +447,6 @@ extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
   ["/usr/local/lib/starch/configure-desktop"]="0:0:755"
   ["/usr/local/lib/starch/add-plymouth"]="0:0:755"
   ["/usr/local/lib/starch/splash-cmdline"]="0:0:755"
-  ["/usr/local/lib/starch/enable-sshd"]="0:0:755"
   ["/usr/local/lib/starch/installer-session"]="0:0:755"
   ["/usr/local/share/hyprland-setup/config/hypr/scripts/"]="0:0:755"
   ["/home/{user}/"]="1500:1500:755"

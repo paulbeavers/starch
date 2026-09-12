@@ -84,16 +84,9 @@ into `localrepo/`, which `build.sh` adds to the profile's pacman.conf.
 `localrepo/` is gitignored because it holds built packages rather than source,
 so a fresh clone has to build them before its first ISO.
 
-Calamares in particular must be the *current* one. starch patches its recipe to
-build the `packagechooser` module, which the AUR recipe skips and which
-`settings.conf` depends on for the "Enable SSHD" checkbox. An ISO built against
-a Calamares from before that patch carries an installer that refuses to start —
-so `build.sh` looks inside the package and refuses to assemble rather than let
-you find out after burning a stick.
-
 Rebuilding Calamares takes twenty minutes and nothing about it changes between
-ISOs, so both scripts skip it when it is already built; `--force-aur` rebuilds
-anyway.
+ISOs, so both scripts skip it when it is already built; `./tools/build-aur.sh --force`
+rebuilds anyway.
 
 Everything else — including, perhaps surprisingly, `broadcom-wl-dkms` — comes
 from the official repositories.

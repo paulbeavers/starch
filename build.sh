@@ -352,10 +352,17 @@ cat > "$AIR/home/${LIVE_USER}/.bash_profile" <<'EOF'
 # Install media: tty1 brings up Calamares. Any other VT is a plain shell, which
 # matters when the installer is the thing that is broken.
 #
-# cage is a kiosk compositor — it runs one application full screen and exits
-# when that application does, so there is no desktop to get lost in and nothing
-# to shut down afterwards. Calamares partitions disks, so it runs as root, and
-# so does the compositor holding its window.
+# The installer is one application on an otherwise empty screen, and it exits
+# when that application does — no desktop to get lost in, nothing to shut down
+# afterwards. Calamares partitions disks, so it runs as root, and so does the
+# compositor holding its window.
+#
+# installer-session runs it under Hyprland, in a window, centred, sized from
+# the monitor. This used to be cage, which by its own description "runs a
+# single, maximized application" and has no windowed mode — so on a 5K display
+# Calamares was 5120 pixels wide, and the windowSize in branding.desc could
+# never do anything about it. cage is kept as the fallback: if the session
+# fails for any reason, a full-screen installer is much better than none.
 #
 # Quitting Calamares drops to the text menu behind it, which still has the
 # advanced install, a shell, the boot log and reboot.
@@ -364,16 +371,17 @@ cat > "$AIR/home/${LIVE_USER}/.bash_profile" <<'EOF'
 # shell, which reads this file — without the guard it execs straight back into
 # the installer and the menu appears to ignore the choice.
 if [[ $XDG_VTNR == 1 && -z ${STARCH_SHELL:-} ]]; then
-    # cage does not scale, so on a high-density panel Calamares would render at
-    # 1x and be unreadable. Qt takes QT_SCALE_FACTOR; live-scale works out what
-    # this display wants from its physical size.
-    scale="$(/usr/local/lib/starch/live-scale 2>/dev/null || echo 1)"
-    sudo -E env QT_SCALE_FACTOR="$scale" cage -- calamares -D6 \
-        2>>/tmp/calamares-session.log
+    # Neither compositor scales, so on a high-density panel Calamares would
+    # render at 1x and be unreadable. Qt takes QT_SCALE_FACTOR; live-scale works
+    # out what this display wants from its physical size. installer-session sets
+    # it itself; the fallback has to be told.
+    sudo -E /usr/local/lib/starch/installer-session \
+        || sudo -E env QT_SCALE_FACTOR="$(/usr/local/lib/starch/live-scale 2>/dev/null || echo 1)" \
+               cage -- calamares -D6 2>>/tmp/calamares-session.log
     exec starch-install
 fi
 EOF
-ok "tty1 opens Calamares under cage, menu behind it"
+ok "tty1 opens Calamares in a window, menu behind it"
 
 # ── Calamares ─────────────────────────────────────────────────────────────────
 install -d "$AIR/etc/calamares/modules" "$AIR/etc/calamares/branding/starch"
@@ -394,6 +402,7 @@ install -m 755 "$HERE/installer/configure-desktop" "$AIR/usr/local/lib/starch/co
 install -m 755 "$HERE/installer/add-plymouth"      "$AIR/usr/local/lib/starch/add-plymouth"
 install -m 755 "$HERE/installer/splash-cmdline"    "$AIR/usr/local/lib/starch/splash-cmdline"
 install -m 755 "$HERE/installer/enable-sshd"       "$AIR/usr/local/lib/starch/enable-sshd"
+install -m 755 "$HERE/installer/installer-session" "$AIR/usr/local/lib/starch/installer-session"
 ok "post-install scripts staged"
 
 # Wireless in the live session. The installed system gets its driver choice
@@ -451,6 +460,7 @@ extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
   ["/usr/local/lib/starch/add-plymouth"]="0:0:755"
   ["/usr/local/lib/starch/splash-cmdline"]="0:0:755"
   ["/usr/local/lib/starch/enable-sshd"]="0:0:755"
+  ["/usr/local/lib/starch/installer-session"]="0:0:755"
   ["/usr/local/share/hyprland-setup/config/hypr/scripts/"]="0:0:755"
   ["/home/{user}/"]="1500:1500:755"
   ["/etc/sudoers.d/00-live"]="0:0:440"

@@ -22,10 +22,14 @@ strings:
     knownIssuesUrl:      https://github.com/paulbeavers/starch/issues
     releaseNotesUrl:     https://github.com/paulbeavers/starch
 
+# The same mark the boot splash uses; make-logos.sh regenerates both from it.
+# logo.png is the mark over the wordmark, trimmed tight so the box it lands in
+# is filled rather than padded, and big enough that Calamares only ever scales
+# it down. logo-small.png is the mark alone and square, for the icon slot.
 images:
     productLogo:    "logo.png"
-    productIcon:    "logo.png"
-    productWelcome: "logo-small.png"
+    productIcon:    "logo-small.png"
+    productWelcome: "logo.png"
 
 slideshow: "show.qml"
 slideshowAPI: 2

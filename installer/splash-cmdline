@@ -15,12 +15,16 @@ set -uo pipefail
 
 ARGS="quiet splash loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0"
 changed=0
+present=0
 
 # systemd-boot: one file per entry, the kernel arguments on an `options` line.
 shopt -s nullglob
 for entry in /boot/loader/entries/*.conf; do
     grep -q '^options ' "$entry" || continue
-    grep -qE '^options .*\bsplash\b' "$entry" && continue
+    if grep -qE '^options .*\bsplash\b' "$entry"; then
+        present=$((present + 1))
+        continue
+    fi
     sed -i -E "s|^(options .*)$|\1 $ARGS|" "$entry"
     echo "  $(basename "$entry")"
     changed=$((changed + 1))
@@ -37,10 +41,15 @@ if [[ -f /etc/default/grub ]] && command -v grub-mkconfig >/dev/null; then
     fi
 fi
 
-if [[ $changed -eq 0 ]]; then
-    echo "  no boot entries to edit; the splash will not show"
-else
+# Three outcomes, and they need saying apart. Reporting "the splash will not
+# show" when every entry already carries the arguments would send someone
+# looking for a fault that is not there.
+if [[ $changed -gt 0 ]]; then
     echo "  splash arguments added to $changed boot entr$( ((changed==1)) && echo y || echo ies)"
+elif [[ $present -gt 0 ]]; then
+    echo "  boot entries already carry the splash arguments"
+else
+    echo "  no boot entries to edit; the splash will not show"
 fi
 
 exit 0

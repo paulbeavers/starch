@@ -23,13 +23,14 @@ strings:
     releaseNotesUrl:     https://github.com/paulbeavers/starch
 
 # The same mark the boot splash uses; make-logos.sh regenerates both from it.
-# logo.png is the mark over the wordmark, trimmed tight so the box it lands in
-# is filled rather than padded, and big enough that Calamares only ever scales
-# it down. logo-small.png is the mark alone and square, for the icon slot.
+# logo.png is the mark over the wordmark on transparency, for the sidebar,
+# which is already dark. welcome.png is the same logo on a dark rounded card,
+# because the welcome page's panel is light and a pale logo vanished on it.
+# logo-small.png is the mark alone and square, for the icon slot.
 images:
     productLogo:    "logo.png"
     productIcon:    "logo-small.png"
-    productWelcome: "logo.png"
+    productWelcome: "welcome.png"
 
 slideshow: "show.qml"
 slideshowAPI: 2

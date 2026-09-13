@@ -461,6 +461,46 @@ ln -sf ../starch-broadcom.service \
     "$AIR/etc/systemd/system/multi-user.target.wants/starch-broadcom.service"
 ok "live session picks its own wireless driver"
 
+# ── stop the image rebuilding the linker cache on every boot ──────────────────
+# ldconfig.service is "Rebuild Dynamic Linker Cache", and it is conditioned on
+#
+#   ConditionNeedsUpdate=|/etc
+#
+# which is true whenever /usr is newer than the .updated stamp in /etc. A fresh
+# airootfs has no such stamp, so the condition holds on every boot of every
+# copy of the medium — and ldconfig walking every library through a compressed
+# squashfs takes upwards of forty seconds. It is most of the wait between the
+# splash and the installer, and it shows up on the details screen as
+#
+#   [ * ] A start job is running for Rebuild Dynamic Linker Cache (40s / no limit)
+#
+# systemd-update-done writes the stamps with /usr's own timestamp, which is
+# exactly what the condition compares against. ldconfig runs first so the cache
+# being stamped as current is also correct.
+#
+# customize_airootfs.sh is the only hook that runs inside the chroot, after
+# everything else has finished touching /etc. mkarchiso warns that it is
+# deprecated and deletes it after running, so nothing of it reaches the image.
+install -d "$AIR/root"
+cat > "$AIR/root/customize_airootfs.sh" <<'CUSTOMIZE'
+#!/usr/bin/env bash
+# Run by mkarchiso inside the airootfs, then deleted. See build.sh.
+#
+# Deliberately cannot fail the build. Neither of these is worth losing a
+# twenty-minute build over: the worst case without them is the boot taking the
+# time back, which is where it was already.
+set -u
+ldconfig || echo "  ldconfig failed; the first boot will rebuild the cache"
+if [[ -x /usr/lib/systemd/systemd-update-done ]]; then
+    /usr/lib/systemd/systemd-update-done || echo "  could not write the .updated stamps"
+else
+    echo "  systemd-update-done is missing; ldconfig.service will run at boot"
+fi
+exit 0
+CUSTOMIZE
+chmod 755 "$AIR/root/customize_airootfs.sh"
+ok "linker cache stamped at build time, not rebuilt at every boot"
+
 # ── the installer ─────────────────────────────────────────────────────────────
 install -d "$AIR/usr/local/bin"
 install -m 755 "$HERE/installer/starch-install" "$AIR/usr/local/bin/starch-install"

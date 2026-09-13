@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # Boot the built ISO in QEMU, so it can be checked without burning a USB.
 #
-#     ./test-boot.sh              UEFI boot, graphical window
+#     ./test-boot.sh              boot the newest ISO, graphical window
+#     ./test-boot.sh --installed  boot what is already on the test disk instead
 #     ./test-boot.sh --headless   serial console only, for a machine with no display
 #     ./test-boot.sh --bios       legacy BIOS instead of UEFI
 #     ./test-boot.sh --monitor    also expose QEMU's monitor on a unix socket
+#
+# Booting the ISO resets the firmware's variable store first. It has to: once
+# an install has succeeded, NVRAM holds a boot entry for the system on the test
+# disk, and the firmware prefers it over the CD no matter what -boot says. The
+# symptom is a run that looks like it tested the ISO and in fact booted last
+# week's install — a login prompt with a username already filled in.
 set -euo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,9 +32,11 @@ command -v qemu-system-x86_64 >/dev/null || {
 # refuses to start unless the backend has GL turned on explicitly ("-display gtk"
 # alone is not enough, it must be "gtk,gl=on"), and in headless mode there is no
 # display to attach it to at all.
-MODE=uefi; MONITOR=0; DISPLAY_ARGS=(-device virtio-vga-gl -display gtk,gl=on)
+MODE=uefi; MONITOR=0; INSTALLED=0
+DISPLAY_ARGS=(-device virtio-vga-gl -display gtk,gl=on)
 for a in "$@"; do
     case "$a" in
+        --installed) INSTALLED=1 ;;
         --headless) DISPLAY_ARGS=(-nographic) ;;
         --bios)     MODE=bios ;;
         --monitor)  MONITOR=1 ;;
@@ -38,12 +47,14 @@ done
 args=(
     -m 4G -smp 4 -enable-kvm
     -cpu host
-    -cdrom "$ISO"
-    -boot d
-    # A blank disk, so an install can actually be exercised.
+    # A disk, so an install can actually be exercised — and so --installed has
+    # something to boot afterwards.
     -drive file="$VMDIR/test-disk.qcow2",if=virtio,format=qcow2
     -device virtio-net,netdev=n0 -netdev user,id=n0
 )
+if [[ $INSTALLED -eq 0 ]]; then
+    args+=(-cdrom "$ISO" -boot d)
+fi
 [[ $MODE == uefi ]] && {
     OVMF=/usr/share/edk2/x64/OVMF_CODE.4m.fd
     VARS=/usr/share/edk2/x64/OVMF_VARS.4m.fd
@@ -55,7 +66,15 @@ args=(
     # installed system leaves no trace in NVRAM and the VM will not boot it on
     # the next run. Give each test VM its own writable copy of the vars.
     NVRAM="$VMDIR/OVMF_VARS.fd"
-    [[ -f $NVRAM ]] || cp "$VARS" "$NVRAM"
+    if [[ $INSTALLED -eq 1 ]]; then
+        # Keep what is there: the boot entry an install wrote is the whole
+        # point of this mode.
+        [[ -f $NVRAM ]] || cp "$VARS" "$NVRAM"
+    else
+        # Start from the pristine store, so the firmware has no entry for the
+        # disk and the CD is the only thing it can boot.
+        cp "$VARS" "$NVRAM"
+    fi
     args+=(
         -drive if=pflash,format=raw,readonly=on,file="$OVMF"
         -drive if=pflash,format=raw,file="$NVRAM"
@@ -78,5 +97,9 @@ fi
 
 [[ -f "$VMDIR/test-disk.qcow2" ]] || qemu-img create -f qcow2 "$VMDIR/test-disk.qcow2" 20G
 
-echo "Booting $(basename "$ISO") in $MODE mode..."
+if [[ $INSTALLED -eq 1 ]]; then
+    echo "Booting the installed system on test-disk.qcow2 in $MODE mode..."
+else
+    echo "Booting $(basename "$ISO") in $MODE mode (firmware variables reset)..."
+fi
 exec qemu-system-x86_64 "${args[@]}" "${DISPLAY_ARGS[@]}"

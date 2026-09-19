@@ -29,6 +29,10 @@ for g in "${groups[@]}"; do
     out+=("${arr[@]}")
 done
 
+# The boot splash is starch's rather than the desktop's, so install.sh does not
+# list it. The installed system is a copy of this image, so it keeps it.
+out+=(plymouth)
+
 # Packages the live ISO needs that an installed system does not.
 out+=(archinstall arch-install-scripts gparted parted dosfstools e2fsprogs
       btrfs-progs exfatprogs mtools nfs-utils ntfs-3g

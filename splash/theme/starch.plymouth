@@ -1,0 +1,50 @@
+[Plymouth Theme]
+Name=starch
+Description=A mountain, a wordmark and a quiet spinner
+ModuleName=two-step
+
+[two-step]
+ImageDir=/usr/share/plymouth/themes/starch
+
+# The logo. two-step calls a static centred image a watermark, which is a
+# misnomer here — it is the whole point of the screen.
+WatermarkImage=watermark.png
+WatermarkHorizontalAlignment=.5
+WatermarkVerticalAlignment=.40
+
+# The spinner, below the logo. Frames are throbber-NNNN.png. The watermark is
+# anchored at its own centre, so the throbber has to clear half the logo's
+# height, not all of it — .73 put it on the wordmark. Kept low and small so it
+# stays clear of the logo on a short panel.
+HorizontalAlignment=.5
+VerticalAlignment=.88
+
+# Crust, flat. A gradient here fights the one baked into the logo, and on a
+# panel that is not colour-managed it bands.
+BackgroundStartColor=0x11111b
+BackgroundEndColor=0x11111b
+
+Transition=none
+TransitionDuration=0.0
+
+# The password dialog, for an encrypted root.
+DialogHorizontalAlignment=.5
+DialogVerticalAlignment=.85
+TitleHorizontalAlignment=.5
+TitleVerticalAlignment=.85
+
+# Progress bar, used when a fsck is running and there is a number to show.
+ProgressBarBackgroundColor=0x313244
+ProgressBarForegroundColor=0xcba6f7
+
+[boot-up]
+UseEndAnimation=false
+UseFirmwareBackground=false
+
+[shutdown]
+UseEndAnimation=false
+UseFirmwareBackground=false
+
+[reboot]
+UseEndAnimation=false
+UseFirmwareBackground=false

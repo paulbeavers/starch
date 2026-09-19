@@ -15,7 +15,12 @@ committing in the submodule, bump the pointer here:
     git add hyprland-setup && git commit
 
 **The submodule is its own checkout.** Editing `~/hyprland-setup` does not
-change `starch/hyprland-setup`; the build reads the latter.
+change `starch/hyprland-setup`; the build reads the latter. Three things can
+disagree — the commit recorded in starch's history, the files checked out in
+`hyprland-setup/`, and what is on origin. `git pull` updates the first and
+never the second. build.sh now refuses to start when those two differ and
+mentions it when origin has moved on, because a stale checkout is otherwise
+silent: the build looks perfect and ships a desktop from weeks ago.
 
 ## Build
 

@@ -78,6 +78,54 @@ fi
 step "Checking prerequisites"
 command -v mkarchiso >/dev/null || die "archiso is not installed:  sudo pacman -S archiso"
 [[ -f $REPO/install.sh ]] || die "the hyprland-setup submodule is empty — run: git submodule update --init"
+
+# The desktop half is a submodule, and three things can disagree about which
+# version that is:
+#
+#   1. the commit recorded in starch's history
+#   2. the files actually checked out in hyprland-setup/
+#   3. what is on the branch at origin
+#
+# `git pull` updates 1 and never 2, and knows nothing about a second clone of
+# the same repo somewhere else. This build reads 2 — the files on disk. So a
+# pull can leave everything looking current while the ISO is built from a
+# checkout that is weeks old, which has happened, silently, and cost a build.
+#
+# Refuse when 2 disagrees with 1: that combination is never deliberate, and the
+# result would be an ISO that no commit describes. Only mention it when origin
+# has moved on, because building an older pin on purpose is a reasonable thing
+# to do.
+if [[ -d $REPO/.git || -f $REPO/.git ]] && command -v git >/dev/null; then
+    pinned="$(git -C "$HERE" rev-parse HEAD:hyprland-setup 2>/dev/null || true)"
+    actual="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)"
+
+    if [[ -n $pinned && -n $actual && $pinned != "$actual" ]]; then
+        die "hyprland-setup is checked out at ${actual:0:7}, but this commit records ${pinned:0:7}.
+    The ISO would be built from files no commit describes. Pick one:
+      git submodule update hyprland-setup                 # use the recorded ${pinned:0:7}
+      git submodule update --remote hyprland-setup && git add hyprland-setup && git commit
+                                                           # take the newest and record it"
+    fi
+
+    if [[ -n ${STARCH_SKIP_REMOTE_CHECK:-} ]]; then
+        :
+    elif timeout 20 git -C "$REPO" fetch -q origin 2>/dev/null; then
+        remote="$(git -C "$REPO" rev-parse origin/HEAD 2>/dev/null \
+                  || git -C "$REPO" rev-parse origin/main 2>/dev/null || true)"
+        if [[ -n $remote && -n $actual && $remote != "$actual" ]] \
+           && git -C "$REPO" merge-base --is-ancestor "$actual" "$remote" 2>/dev/null; then
+            behind="$(git -C "$REPO" rev-list --count "$actual".."$remote" 2>/dev/null || echo '?')"
+            warn "hyprland-setup is $behind commit(s) behind origin — building ${actual:0:7}"
+            git -C "$REPO" log --oneline "$actual".."$remote" 2>/dev/null | sed 's/^/      /'
+            info "to take them:  git submodule update --remote hyprland-setup && git add hyprland-setup && git commit"
+        fi
+    fi
+
+    if [[ -n "$(git -C "$REPO" status --porcelain 2>/dev/null)" ]]; then
+        warn "hyprland-setup has uncommitted changes — the ISO will contain them"
+    fi
+    ok "hyprland-setup at ${actual:0:7}$(git -C "$REPO" log -1 --format=' (%s)' 2>/dev/null)"
+fi
 [[ -d $RELENG ]] || die "stock releng profile not found at $RELENG"
 ok "archiso $(pacman -Q archiso 2>/dev/null | awk '{print $2}')"
 

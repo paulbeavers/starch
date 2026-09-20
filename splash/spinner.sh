@@ -2,6 +2,10 @@
 # A ring of dots that fades round the circle. Dots rather than a rotating arc
 # because Plymouth plays frames at a fixed rate and a rotating arc makes any
 # stutter obvious, while a fading ring does not.
+#
+# Sapphire, the desktop's accent. The splash is rendered at build time and has
+# no palette to read, so the colour is written out here; it is the same
+# #74c7ec that theme.sh resolves `accent` to.
 set -euo pipefail
 # Small on purpose. It sits below the logo, and on a 1280x800 panel a large
 # ring reached the wordmark; the splash should read as a logo with a quiet
@@ -22,7 +26,7 @@ for ((f=0; f<N; f++)); do
     ang=$(awk -v i="$i" 'BEGIN{ printf "%.6f", (i*30 - 90) * 3.14159265/180 }')
     x=$(awk -v c="$C" -v r="$R" -v a="$ang" 'BEGIN{ printf "%.1f", c + r*cos(a) }')
     y=$(awk -v c="$C" -v r="$R" -v a="$ang" 'BEGIN{ printf "%.1f", c + r*sin(a) }')
-    args+=( -fill "rgba(203,166,247,$a)" -draw "circle $x,$y $x,$(awk -v y="$y" -v d="$DOT" 'BEGIN{printf "%.1f", y-d}')" )
+    args+=( -fill "rgba(116,199,236,$a)" -draw "circle $x,$y $x,$(awk -v y="$y" -v d="$DOT" 'BEGIN{printf "%.1f", y-d}')" )
   done
   magick -size ${S}x${S} xc:none "${args[@]}" "PNG32:$(printf 'throbber-%04d.png' "$f")"
 done

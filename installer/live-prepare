@@ -63,13 +63,37 @@ read -r win_w win_h < <(awk -v w="$width" -v h="$height" -v s="$scale" 'BEGIN {
     printf "%d %d\n", ww, hh
 }')
 
+# Calamares' Wayland app_id is reverse-DNS — io.calamares.calamares — and a
+# rule matching only "calamares" silently does not apply, which is how the
+# installer came up tiled across the whole screen with the rule sitting right
+# there looking correct. Both spellings are matched: the plain one is what an
+# X11 build reports through XWayland. [.] rather than \. because this is a
+# Lua string first and a regex second, and Lua 5.4 rejects \. as an invalid
+# escape sequence — the whole config would fail to load, not just the rule.
 cat > "$HYPR/live-window.lua" <<LUA
 -- Written by live-prepare at boot. ${width}x${height} detected at scale $scale.
 hl.window_rule({
     name  = "calamares",
-    match = { class = "^([Cc]alamares)\$" },
+    match = { class = "^(io[.]calamares[.]calamares|[Cc]alamares)\$" },
     float = true, center = true, size = { $win_w, $win_h },
 })
 LUA
+
+# ── the wallpaper, if this panel wants the other render ──────────────────────
+# The image bakes the 16:9 render, because at build time there is no panel to
+# ask. Here there is. Same 19/10 test install.sh uses: wider than a widescreen
+# gets the ultrawide layout, which is laid out for the extra width rather than
+# being the 16:9 one stretched across it.
+#
+# --no-reload because nothing is running yet; Hyprland starts moments from now
+# and hyprpaper reads the file it just rewrote. Non-fatal: a medium with the
+# wrong-aspect wallpaper is a cosmetic problem, a medium that will not boot is
+# not.
+if (( width * 10 > height * 19 )); then
+    wide="$(ls "$HOME"/Pictures/wallpapers/*-5120x2160.png 2>/dev/null | head -1)"
+    if [[ -n $wide && -x $HYPR/scripts/wallpaper.sh ]]; then
+        "$HYPR/scripts/wallpaper.sh" --no-reload --set "$wide" >/dev/null 2>&1 || true
+    fi
+fi
 
 exit 0

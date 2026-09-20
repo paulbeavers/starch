@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Open the installer inside the live desktop.
+#
+# Calamares partitions disks, so it is the one thing here that runs as root.
+# The compositor does not, and Hyprland refuses to anyway — which is right, and
+# is why this is a small script rather than a line in a config.
+#
+# The variables are named rather than handed over with sudo -E: -E depends on
+# the sudoers policy allowing it and can drop one without saying so, and a
+# Wayland client with no WAYLAND_DISPLAY simply fails to start.
+set -uo pipefail
+
+LOG=/tmp/calamares-session.log
+scale="$(/usr/local/lib/starch/live-scale 2>/dev/null || echo 1)"
+
+# Let the desktop settle first. Calamares is the heaviest thing on the medium
+# and starting it against a compositor that is still bringing up its bar and
+# portals makes for a slower, uglier first few seconds than waiting a moment.
+sleep 2
+
+exec sudo env \
+    XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" \
+    WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" \
+    HYPRLAND_INSTANCE_SIGNATURE="${HYPRLAND_INSTANCE_SIGNATURE:-}" \
+    QT_QPA_PLATFORM=wayland \
+    QT_SCALE_FACTOR="$scale" \
+    calamares -D6 2>>"$LOG"

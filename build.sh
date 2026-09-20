@@ -418,7 +418,68 @@ for f in passwd group shadow gshadow; do
 done
 ok "user and group databases left to the packages"
 
-# ── autologin straight into Hyprland ──────────────────────────────────────────
+# ── the live session is the finished desktop ──────────────────────────────────
+# The medium boots into the same desktop it installs, with the installer
+# opening on top of it — the way Ubuntu and most others do it. Two reasons
+# beyond looking better than a full-screen installer on a 5K monitor: you can
+# see what you are about to install before committing a disk to it, and the
+# installer becomes a window on a compositor that honours geometry, which is
+# the thing cage could never do.
+#
+# The config is copied rather than installed. install.sh --for-user would also
+# detect monitors and a GPU, and it would be detecting this build machine's,
+# which is exactly wrong for a medium that boots on someone else's hardware.
+# monitors.lua and gpu.lua are deliberately absent: hyprland.lua treats both as
+# optional and Hyprland's own detection is right when there is nothing to say.
+LIVE_HOME="$AIR/home/$LIVE_USER"
+install -d "$LIVE_HOME/.config"
+cp -r "$REPO/config/." "$LIVE_HOME/.config/"
+find "$LIVE_HOME/.config" -name '*.sh' -exec chmod 755 {} +
+rm -f "$LIVE_HOME/.config/hypr/monitors.lua" "$LIVE_HOME/.config/hypr/gpu.lua"
+
+# starch-config opens on its welcome page at first login. On the medium the
+# installer is the thing that should have your attention, so the switch that
+# page offers is pre-set for the live user only.
+install -d "$LIVE_HOME/.config/starch"
+cat > "$LIVE_HOME/.config/starch/settings.json" <<'STATE'
+{
+  "show_at_login": false
+}
+STATE
+
+# hyprland.lua ends with optional("live"), which exists for exactly this: a
+# module that is only ever present on install media. It is what makes the
+# session an installer session rather than a desktop that happens to be
+# running from a stick.
+cat > "$LIVE_HOME/.config/hypr/live.lua" <<'LIVE'
+--------------------------------------------------------------------------------
+--  Install media only
+--
+--  Loaded last by hyprland.lua, and present only here — an installed system
+--  has no such file. Everything in it is about the medium.
+--------------------------------------------------------------------------------
+
+-- The installer is a window, not the screen. live-prepare sizes it from the
+-- monitor it finds, since half of a 5K panel and half of a 1280x800 one want
+-- different answers, and writes live-window.lua just before Hyprland starts.
+--
+-- pcall rather than hyprland.lua's optional(), which is a local in that file
+-- and not visible from a module it requires. Missing means live-prepare did
+-- not run: the installer still opens, tiled, which is what it did before any
+-- of this.
+pcall(require, "live-window")
+
+hl.on("hyprland.start", function()
+    -- The installer, elevated. Calamares partitions disks; nothing else here
+    -- is root. The variables are named rather than passed with sudo -E, which
+    -- depends on the sudoers policy and can drop one without saying so.
+    hl.exec_cmd("/usr/local/lib/starch/start-installer")
+end)
+LIVE
+
+ok "live session gets the desktop config, with the installer on top"
+
+# ── autologin straight into the desktop ───────────────────────────────────────
 install -d "$AIR/etc/systemd/system/getty@tty1.service.d"
 cat > "$AIR/etc/systemd/system/getty@tty1.service.d/autologin.conf" <<EOF
 [Service]
@@ -426,44 +487,37 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin ${LIVE_USER} --noclear %I \$TERM
 EOF
 
-install -d "$AIR/home/${LIVE_USER}"
 cat > "$AIR/home/${LIVE_USER}/.bash_profile" <<'EOF'
-# Install media: tty1 brings up Calamares. Any other VT is a plain shell, which
-# matters when the installer is the thing that is broken.
+# Install media: tty1 brings up the desktop, with the installer on top of it.
+# Any other VT is a plain shell, which matters when the desktop is the thing
+# that is broken.
 #
-# cage is a kiosk compositor — it runs one application full screen and exits
-# when that application does, so there is no desktop to get lost in and nothing
-# to shut down afterwards. Calamares partitions disks, so it runs as root, and
-# so does the compositor holding its window.
+# Hyprland directly, not through uwsm or a display manager. Nothing here waits
+# on graphical.target, and nothing waits on the network — an earlier attempt at
+# a live desktop put a ninety second countdown on the screen and the cause was
+# cloud-init and networkd-wait-online pulling in network-online.target, not the
+# compositor. Those are off on this medium.
 #
-# Full screen is cage's whole design: view_position() maximizes any toplevel
-# with no parent, which is every main window. The windowSize and
-# windowPlacement in branding.desc are therefore inert, and left there only
-# because they would matter again under any other compositor.
+# If the session cannot start, the text installer still can. That is the whole
+# reason the fallback is here: a graphical failure should cost you the pretty
+# installer, not the ability to install.
 #
-# Running the installer windowed was tried and reverted. It needs a compositor
-# that honours geometry, and the only one on the medium is Hyprland, which
-# wants to be launched through start-hyprland, refuses to run as root, and
-# needs XDG_RUNTIME_DIR arranged for it first. Three hoops and a second
-# compositor in the boot path, to centre a window. Not worth it.
-#
-# Quitting Calamares drops to the text menu behind it, which still has the
-# advanced install, a shell, the boot log and reboot.
-#
-# STARCH_SHELL guards against re-entry. The menu's Shell option runs a login
-# shell, which reads this file — without the guard it execs straight back into
-# the installer and the menu appears to ignore the choice.
+# STARCH_SHELL guards against re-entry. The text menu's Shell option runs a
+# login shell, which reads this file — without the guard it execs straight back
+# into the installer and the menu appears to ignore the choice.
 if [[ $XDG_VTNR == 1 && -z ${STARCH_SHELL:-} ]]; then
-    # cage does not scale, so on a high-density panel Calamares would render at
-    # 1x and be unreadable. Qt takes QT_SCALE_FACTOR; live-scale works out what
-    # this display wants from its physical size.
-    scale="$(/usr/local/lib/starch/live-scale 2>/dev/null || echo 1)"
-    sudo -E env QT_SCALE_FACTOR="$scale" cage -- calamares -D6 \
-        2>>/tmp/calamares-session.log
+    # Decide the display scale and the installer's window size from the panel
+    # in front of us, and write both where hyprland.lua will read them.
+    /usr/local/lib/starch/live-prepare
+
+    Hyprland 2>>/tmp/hyprland-session.log
+
+    # Hyprland exited: either the installer finished and quit the session, or
+    # it never started. Either way the text menu is what is left.
     exec starch-install
 fi
 EOF
-ok "tty1 opens Calamares under cage, menu behind it"
+ok "tty1 opens the desktop with the installer on it, text menu behind"
 
 # ── Calamares ─────────────────────────────────────────────────────────────────
 install -d "$AIR/etc/calamares/modules" "$AIR/etc/calamares/branding/starch"
@@ -481,6 +535,8 @@ install -m 755 "$HERE/installer/broadcom-live"     "$AIR/usr/local/lib/starch/br
 install -m 755 "$HERE/installer/copy-kernel"       "$AIR/usr/local/lib/starch/copy-kernel"
 install -m 755 "$HERE/installer/strip-live"        "$AIR/usr/local/lib/starch/strip-live"
 install -m 755 "$HERE/installer/configure-desktop" "$AIR/usr/local/lib/starch/configure-desktop"
+install -m 755 "$HERE/installer/live-prepare"      "$AIR/usr/local/lib/starch/live-prepare"
+install -m 755 "$HERE/installer/start-installer"   "$AIR/usr/local/lib/starch/start-installer"
 install -m 755 "$HERE/installer/add-plymouth"      "$AIR/usr/local/lib/starch/add-plymouth"
 install -m 755 "$HERE/installer/splash-cmdline"    "$AIR/usr/local/lib/starch/splash-cmdline"
 ok "post-install scripts staged"
@@ -530,16 +586,40 @@ ok "live session picks its own wireless driver"
 # everything else has finished touching /etc. mkarchiso warns that it is
 # deprecated and deletes it after running, so nothing of it reaches the image.
 install -d "$AIR/root"
-cat > "$AIR/root/customize_airootfs.sh" <<'CUSTOMIZE'
+# The theme the live desktop wears is the one a fresh install gets, read from
+# install.sh so the medium and the machine it makes cannot drift apart.
+LIVE_THEME="$(sed -n 's/^DEFAULT_THEME=//p' "$REPO/install.sh" | head -1)"
+LIVE_WALL="$(sed -n 's/^DEFAULT_WALLPAPER=//p' "$REPO/install.sh" | head -1)"
+[[ -n $LIVE_THEME ]] || die "could not read DEFAULT_THEME from install.sh"
+
+cat > "$AIR/root/customize_airootfs.sh" <<CUSTOMIZE
 #!/usr/bin/env bash
 # Run by mkarchiso inside the airootfs, then deleted. See build.sh.
+
+# The live desktop's palette. theme.sh renders the active theme into the six
+# formats the desktop reads — waybar imports a colors.css that does not exist
+# until this runs, and an unstyled bar is the first thing anyone would see.
+# --no-reload because there is nothing running in a chroot to signal.
+if [ -x /home/${LIVE_USER}/.config/hypr/scripts/theme.sh ]; then
+    HOME=/home/${LIVE_USER} XDG_CONFIG_HOME=/home/${LIVE_USER}/.config \
+        /home/${LIVE_USER}/.config/hypr/scripts/theme.sh --set ${LIVE_THEME} --no-reload \
+        || echo "  theme.sh failed; the live bar will be unstyled"
+fi
+
+# And its wallpaper, by the same argument: hyprpaper.conf and the lock screen
+# are both rendered from the recorded choice.
+if [ -x /home/${LIVE_USER}/.config/hypr/scripts/wallpaper.sh ] && [ -f "${LIVE_WALL}" ]; then
+    HOME=/home/${LIVE_USER} XDG_CONFIG_HOME=/home/${LIVE_USER}/.config \
+        /home/${LIVE_USER}/.config/hypr/scripts/wallpaper.sh --set "${LIVE_WALL}" --no-reload \
+        || echo "  wallpaper.sh failed; the live desktop will have no wallpaper"
+fi
 #
 # Deliberately cannot fail the build. Neither of these is worth losing a
 # twenty-minute build over: the worst case without them is the boot taking the
 # time back, which is where it was already.
 set -u
 ldconfig || echo "  ldconfig failed; the first boot will rebuild the cache"
-if [[ -x /usr/lib/systemd/systemd-update-done ]]; then
+if [ -x /usr/lib/systemd/systemd-update-done ]; then
     /usr/lib/systemd/systemd-update-done || echo "  could not write the .updated stamps"
 else
     echo "  systemd-update-done is missing; ldconfig.service will run at boot"
@@ -577,6 +657,8 @@ extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
   ["/usr/local/lib/starch/copy-kernel"]="0:0:755"
   ["/usr/local/lib/starch/strip-live"]="0:0:755"
   ["/usr/local/lib/starch/configure-desktop"]="0:0:755"
+  ["/usr/local/lib/starch/live-prepare"]="0:0:755"
+  ["/usr/local/lib/starch/start-installer"]="0:0:755"
   ["/usr/local/lib/starch/add-plymouth"]="0:0:755"
   ["/usr/local/lib/starch/splash-cmdline"]="0:0:755"
   ["/usr/local/share/hyprland-setup/config/hypr/scripts/"]="0:0:755"

@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Work out what this machine needs, before the compositor starts.
+#
+# Two things have to be decided from the hardware in front of us rather than
+# baked into the image: how big the installer window should be, and whether the
+# display needs scaling. Both are written as Lua that hyprland.lua picks up.
+#
+# Runs as the live user on tty1, from .bash_profile, immediately before
+# Hyprland is exec'd.
+set -uo pipefail
+
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}"
+HYPR="$CFG/hypr"
+
+# The largest connected mode; the first line of a connector's modes is its
+# preferred one.
+width=0 height=0
+for modes in /sys/class/drm/card*-*/modes; do
+    [[ -r $modes ]] || continue
+    conn="${modes%/modes}"
+    [[ -r $conn/status && "$(cat "$conn/status")" == connected ]] || continue
+    res="$(head -1 "$modes")"
+    w="${res%%x*}"; h="${res##*x}"
+    [[ $w =~ ^[0-9]+$ && $h =~ ^[0-9]+$ ]] || continue
+    if (( w * h > width * height )); then width=$w; height=$h; fi
+done
+(( width > 0 && height > 0 )) || { width=1920; height=1080; }
+
+# ── display scale ─────────────────────────────────────────────────────────────
+# live-scale decides on density, not resolution. Hyprland will not take any
+# number though: RESOLUTION / SCALE has to land on a whole pixel in both axes,
+# and it snaps silently to the nearest legal value rather than complaining. So
+# check before writing, and write nothing if the answer is 1 — Hyprland's own
+# detection is right when there is nothing to say.
+scale="$(/usr/local/lib/starch/live-scale 2>/dev/null || echo 1)"
+legal=$(awk -v w="$width" -v h="$height" -v s="$scale" 'BEGIN {
+    if (s <= 1) { print 0; exit }
+    x = w / s; y = h / s
+    print (x == int(x) && y == int(y)) ? 1 : 0
+}')
+if [[ $legal == 1 ]]; then
+    cat > "$HYPR/monitors.lua" <<LUA
+-- Written by live-prepare at boot, from this machine's panel. Install media
+-- only: an installed system gets its own from install.sh.
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = $scale })
+LUA
+else
+    rm -f "$HYPR/monitors.lua"
+fi
+
+# ── the installer window ──────────────────────────────────────────────────────
+# Half the screen, floored at what Calamares needs to lay itself out in — half
+# of 1280x800 is smaller than that — and capped so it never touches the edges.
+# Qt scales the contents, so the floor scales with it.
+read -r win_w win_h < <(awk -v w="$width" -v h="$height" -v s="$scale" 'BEGIN {
+    if (s <= 0) s = 1
+    ww = w / 2;  hh = h / 2
+    minw = 900 * s;  minh = 620 * s
+    if (ww < minw) ww = minw
+    if (hh < minh) hh = minh
+    if (ww > w * 0.92) ww = w * 0.92
+    if (hh > h * 0.92) hh = h * 0.92
+    printf "%d %d\n", ww, hh
+}')
+
+cat > "$HYPR/live-window.lua" <<LUA
+-- Written by live-prepare at boot. ${width}x${height} detected at scale $scale.
+hl.window_rule({
+    name  = "calamares",
+    match = { class = "^([Cc]alamares)\$" },
+    float = true, center = true, size = { $win_w, $win_h },
+})
+LUA
+
+exit 0

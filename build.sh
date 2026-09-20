@@ -435,6 +435,18 @@ LIVE_HOME="$AIR/home/$LIVE_USER"
 install -d "$LIVE_HOME/.config"
 cp -r "$REPO/config/." "$LIVE_HOME/.config/"
 find "$LIVE_HOME/.config" -name '*.sh' -exec chmod 755 {} +
+
+# The wallpapers live outside config/ because they are not configuration and do
+# not belong in ~/.config. install.sh puts them here on a real machine; the
+# medium needs the same, both so the live desktop has one and so SUPER+W has
+# something to offer.
+install -d "$LIVE_HOME/Pictures/wallpapers"
+if compgen -G "$REPO/wallpapers/*.png" >/dev/null; then
+    cp "$REPO"/wallpapers/*.png "$LIVE_HOME/Pictures/wallpapers/"
+    ok "live session gets $(ls "$REPO"/wallpapers/*.png | wc -l) wallpapers"
+else
+    warn "hyprland-setup ships no wallpapers/ — the live desktop will have none"
+fi
 rm -f "$LIVE_HOME/.config/hypr/monitors.lua" "$LIVE_HOME/.config/hypr/gpu.lua"
 
 # starch-config opens on its welcome page at first login. On the medium the
@@ -589,7 +601,13 @@ install -d "$AIR/root"
 # The theme the live desktop wears is the one a fresh install gets, read from
 # install.sh so the medium and the machine it makes cannot drift apart.
 LIVE_THEME="$(sed -n 's/^DEFAULT_THEME=//p' "$REPO/install.sh" | head -1)"
-LIVE_WALL="$(sed -n 's/^DEFAULT_WALLPAPER=//p' "$REPO/install.sh" | head -1)"
+# DEFAULT_WALLPAPER names a design in hyprland-setup's wallpapers/, not a path:
+# each design ships a 16:9 and an ultrawide render and which one fits is a
+# property of the panel, not of the repo. The medium bakes the 16:9 one, and
+# live-prepare swaps to the wide render at boot if the screen turns out to want
+# it. Read as a path, this used to be /usr/share/hypr/wall2.png.
+LIVE_WALL_DESIGN="$(sed -n 's/^DEFAULT_WALLPAPER=//p' "$REPO/install.sh" | head -1)"
+LIVE_WALL="/home/${LIVE_USER}/Pictures/wallpapers/${LIVE_WALL_DESIGN}-3840x2160.png"
 [[ -n $LIVE_THEME ]] || die "could not read DEFAULT_THEME from install.sh"
 
 cat > "$AIR/root/customize_airootfs.sh" <<CUSTOMIZE
@@ -618,6 +636,40 @@ fi
 # twenty-minute build over: the worst case without them is the boot taking the
 # time back, which is where it was already.
 set -u
+
+# theme.sh and wallpaper.sh just ran as root with HOME pointed at the live
+# user, and whatever they cached landed in /home/${LIVE_USER} owned by root.
+# archiso applies profiledef's file_permissions *before* this script runs, so
+# nothing puts it back: /home/${LIVE_USER}/.cache shipped as root:root 700, and
+# every app that wants a cache directory died on startup. kitty was the visible
+# one — SUPER+Return did nothing and the medium had no way to reach a shell.
+#
+# Numeric ids, to match profiledef and because name lookup in a chroot is one
+# more thing that can quietly not work.
+chown -R 1500:1500 /home/${LIVE_USER}
+
+# ── networking, matched to what an installed system gets ─────────────────────
+# archiso ships iwd + systemd-networkd. Everything on this desktop that shows
+# or controls a network is NetworkManager's — waybar's network module, the
+# nm-applet tray icon, nmtui — so the medium had a wireless stack that nothing
+# on screen could drive. strip-live already flips the installed system this way
+# round; doing it here makes the medium agree with what it installs.
+#
+# systemctl rather than hand-made .wants symlinks: NetworkManager carries
+# Alias= and Also= units for D-Bus activation, and symlinks miss them. That is
+# the same lesson strip-live records for the disable direction.
+systemctl enable  --no-reload NetworkManager.service \
+    || echo "  could not enable NetworkManager; the live session will have no network UI"
+systemctl disable --no-reload iwd.service systemd-networkd.service \
+                              systemd-networkd.socket >/dev/null 2>&1 || true
+
+# Not optional, and not redundant: `systemctl enable NetworkManager.service`
+# carries Also=NetworkManager-wait-online.service, so the line above *creates*
+# network-online.target.wants/NetworkManager-wait-online.service as a side
+# effect. That is the family of unit that put a ninety second countdown on the
+# screen. It has to be taken back off, and it has to happen after the enable.
+systemctl disable --no-reload NetworkManager-wait-online.service >/dev/null 2>&1 || true
+
 ldconfig || echo "  ldconfig failed; the first boot will rebuild the cache"
 if [ -x /usr/lib/systemd/systemd-update-done ]; then
     /usr/lib/systemd/systemd-update-done || echo "  could not write the .updated stamps"

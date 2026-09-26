@@ -493,6 +493,21 @@ hl.on("hyprland.start", function()
     -- is root. The variables are named rather than passed with sudo -E, which
     -- depends on the sudoers policy and can drop one without saying so.
     hl.exec_cmd("/usr/local/lib/starch/start-installer")
+
+    -- The wallpaper, a second time, once the session has settled.
+    --
+    -- autostart.lua applies it the moment hyprpaper starts, which on the
+    -- medium is also the moment the bar, the portals and a Qt installer are
+    -- all starting and the compositor has just taken the GPU. hyprpaper
+    -- answers "ok" to the apply whether or not it has a surface yet, and
+    -- 0.8.4 offers no way to ask what it is showing, so the first attempt
+    -- cannot be confirmed and a medium that came up with a flat colour
+    -- instead of the lattice had no way to recover.
+    --
+    -- An installed system does not need this: it applies the wallpaper at
+    -- login, on a quiet session, and gets it right. This file only exists on
+    -- the medium, which is exactly where the noise is.
+    hl.exec_cmd("bash -c 'sleep 8; ~/.config/hypr/scripts/wallpaper.sh --restore'")
 end)
 LIVE
 

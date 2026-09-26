@@ -504,11 +504,18 @@ cat > "$AIR/home/${LIVE_USER}/.bash_profile" <<'EOF'
 # Any other VT is a plain shell, which matters when the desktop is the thing
 # that is broken.
 #
-# Hyprland directly, not through uwsm or a display manager. Nothing here waits
-# on graphical.target, and nothing waits on the network — an earlier attempt at
-# a live desktop put a ninety second countdown on the screen and the cause was
+# start-hyprland, not uwsm and not a display manager. Nothing here waits on
+# graphical.target, and nothing waits on the network — an earlier attempt at a
+# live desktop put a ninety second countdown on the screen and the cause was
 # cloud-init and networkd-wait-online pulling in network-online.target, not the
 # compositor. Those are off on this medium.
+#
+# start-hyprland is the watchdog the hyprland package ships, and is not a
+# session manager, so none of the above changes. Calling the Hyprland binary
+# straight puts "Hyprland was started without start-hyprland" on the screen of
+# every boot of the medium. An installed system never sees it: the stock
+# hyprland.desktop is Exec=/usr/bin/start-hyprland, and the uwsm entry resolves
+# through that same file, so the medium was the only thing doing it by hand.
 #
 # If the session cannot start, the text installer still can. That is the whole
 # reason the fallback is here: a graphical failure should cost you the pretty
@@ -522,7 +529,7 @@ if [[ $XDG_VTNR == 1 && -z ${STARCH_SHELL:-} ]]; then
     # in front of us, and write both where hyprland.lua will read them.
     /usr/local/lib/starch/live-prepare
 
-    Hyprland 2>>/tmp/hyprland-session.log
+    start-hyprland 2>>/tmp/hyprland-session.log
 
     # Hyprland exited: either the installer finished and quit the session, or
     # it never started. Either way the text menu is what is left.

@@ -684,6 +684,25 @@ systemctl disable --no-reload iwd.service systemd-networkd.service \
 # screen. It has to be taken back off, and it has to happen after the enable.
 systemctl disable --no-reload NetworkManager-wait-online.service >/dev/null 2>&1 || true
 
+# And tell NetworkManager to hand DNS to systemd-resolved, explicitly.
+#
+# /etc/resolv.conf is a symlink to resolved's stub, and resolved is enabled —
+# strip-live keeps it that way on purpose. What changed is who produces the
+# DNS: systemd-networkd did, and resolved picked it up from it. NetworkManager
+# does now, and with its default backend it wants to write /etc/resolv.conf
+# itself, which is a symlink it will not overwrite. The result is an address
+# and a route and no name resolution at all — which is exactly what the first
+# medium to ship with NetworkManager did.
+install -d /etc/NetworkManager/conf.d
+cat > /etc/NetworkManager/conf.d/dns-systemd-resolved.conf <<'NMDNS'
+# Written by the starch build. resolv.conf is resolved's stub, so DNS has to
+# go to resolved over D-Bus rather than into a file NetworkManager cannot
+# write. Not left to NetworkManager's auto-detection: this is the one setting
+# standing between a connected machine and a working name lookup.
+[main]
+dns=systemd-resolved
+NMDNS
+
 ldconfig || echo "  ldconfig failed; the first boot will rebuild the cache"
 if [ -x /usr/lib/systemd/systemd-update-done ]; then
     /usr/lib/systemd/systemd-update-done || echo "  could not write the .updated stamps"

@@ -48,7 +48,25 @@ done
 if [[ -z $found ]]; then
     if (( ${#seen[@]} )); then
         logger -t starch-broadcom \
-            "Broadcom ${seen[*]} present, none on the wl list; leaving the in-kernel driver in charge"
+            "Broadcom ${seen[*]} present, none on the wl list; keeping wl away from it"
+        # Not merely "do nothing". wl matches on PCI *class* —
+        #
+        #     alias: pci:v*d*sv*sd*bc02sc80i*
+        #
+        # "any other network controller" — so udev autoloads it for a card it
+        # has no business driving, alongside the in-kernel driver that does,
+        # and whichever binds first wins. On a BCM43602 a win for wl means a
+        # card with a driver that cannot carry traffic. Taking the card off
+        # the wl list was only half the fix; this is the half that makes the
+        # in-kernel driver win every time instead of most of the time.
+        cat > /etc/modprobe.d/starch-broadcom.conf <<'CONF'
+# Written at boot by starch: this machine's Broadcom card is handled by the
+# in-kernel driver. wl claims cards by PCI class rather than by device id, so
+# it would otherwise race for this one and cannot drive it.
+blacklist wl
+CONF
+        modprobe -r wl 2>/dev/null || true
+        modprobe brcmfmac 2>/dev/null || true
     else
         logger -t starch-broadcom "no Broadcom card on this machine; nothing to do"
     fi

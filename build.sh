@@ -249,7 +249,14 @@ AIR="$PROFILE/airootfs"
 # installed machine, and the point of starch is that nothing of it remains.
 DEST="$AIR/usr/local/share/hyprland-setup"
 install -d "$DEST"
-for item in install.sh README.md config starch-config; do
+#
+# Adding a top-level directory to hyprland-setup means adding it here too.
+# wallpapers/ was missed on its first outing: install.sh copies the images out
+# of its own directory, the guard around that is a compgen test, so a missing
+# wallpapers/ failed silently and every installed machine came up with no
+# wallpaper at all.
+for item in install.sh README.md config starch-config wallpapers; do
+    [[ -e $REPO/$item ]] || die "hyprland-setup has no $item — the embedded payload would be incomplete"
     cp -r "$REPO/$item" "$DEST/"
 done
 

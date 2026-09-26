@@ -17,21 +17,43 @@ set -uo pipefail
 # The same list install.sh uses. Cards the in-kernel drivers cannot drive, or
 # drive worse than the proprietary wl module.
 #   43a0 BCM4360 (2013 retina MacBook Pro)   4331 BCM4331 (older MacBook Pro)
-#   43b1 BCM4352   43ba BCM43602   43a3 BCM4350
-#   432b BCM4322   4353 BCM43224   4315 BCM4312
-WL_IDS=(0x43a0 0x4331 0x43b1 0x43ba 0x43a3 0x432b 0x4353 0x4315)
+#   43b1 BCM4352   432b BCM4322   4353 BCM43224   4315 BCM4312
+#
+# Check any addition against brcmfmac's own alias table first:
+#
+#     modinfo brcmfmac | grep -oiE 'd0000[0-9A-F]{4}'
+#
+# 43ba (BCM43602) and 43a3 (BCM4350) used to be here and are claimed by
+# brcmfmac, which ships their firmware too. Listing them blacklisted the
+# driver that works and loaded wl, which cannot bind them. A 2013 15" MacBook
+# Pro is a BCM43602 and had no wireless at all as a result.
+WL_IDS=(0x43a0 0x4331 0x43b1 0x432b 0x4353 0x4315)
 
 found=""
+seen=()
 for dev in /sys/bus/pci/devices/*; do
     [[ -r $dev/vendor && -r $dev/device ]] || continue
     [[ "$(cat "$dev/vendor")" == 0x14e4 ]] || continue
     id="$(cat "$dev/device")"
+    seen+=("${id#0x}")
     for want in "${WL_IDS[@]}"; do
         [[ $id == "$want" ]] && { found="$id"; break 2; }
     done
 done
 
-[[ -n $found ]] || exit 0
+# Leaving an unlisted card to the in-kernel drivers is deliberate, but it used
+# to be indistinguishable from having no Broadcom card at all: both exited 0
+# with nothing logged. When wireless then does not work, this is the one line
+# that says which of the two happened, and names the id to add to WL_IDS.
+if [[ -z $found ]]; then
+    if (( ${#seen[@]} )); then
+        logger -t starch-broadcom \
+            "Broadcom ${seen[*]} present, none on the wl list; leaving the in-kernel driver in charge"
+    else
+        logger -t starch-broadcom "no Broadcom card on this machine; nothing to do"
+    fi
+    exit 0
+fi
 
 logger -t starch-broadcom "Broadcom ${found#0x} needs the wl driver; switching"
 

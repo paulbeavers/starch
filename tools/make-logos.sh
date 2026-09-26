@@ -18,10 +18,26 @@ HERE="$ROOT/calamares/branding/starch"
     exit 1
 }
 
-# productLogo and productWelcome: the mark over the wordmark, trimmed tight so
-# whatever box Calamares puts it in is filled rather than padded, and at a
-# resolution it will scale *down* from on any panel.
-HEIGHT=1100 bash "$SPLASH/logo.sh" "$HERE/logo.png"
+tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+
+# The mark over the wordmark, at a resolution it will scale *down* from on any
+# panel. logo.sh trims it tight, so its artwork starts at the very first pixel.
+tight="$tmp/logo-tight.png"
+HEIGHT=1100 bash "$SPLASH/logo.sh" "$tight"
+
+# productLogo: the tight mark with transparent margin added back.
+#
+# Trimmed tight, it sat flush against the top edge of the sidebar and read as
+# a rendering fault. The margin has to be in the asset: Calamares scales the
+# pixmap to the box it gives the label, and QSS padding on the sidebar widget
+# does not move a pixmap inside its own label — that was tried and changed
+# nothing. Vertical only, because the sidebar is fitted to its width, so
+# padding the sides would merely shrink the mark while leaving the top flush.
+lw=$(identify -format %w "$tight")
+lh=$(identify -format %h "$tight")
+pad=$(( lh * 12 / 100 ))
+magick "$tight" -background none -gravity center \
+    -extent "${lw}x$(( lh + pad * 2 ))" "PNG32:$HERE/logo.png"
 
 # productWelcome: the same logo on a dark rounded card.
 #
@@ -36,13 +52,12 @@ HEIGHT=1100 bash "$SPLASH/logo.sh" "$HERE/logo.png"
 card_w=1400; card_h=920; radius=30
 magick -size "${card_w}x${card_h}" xc:none \
     -fill '#11111b' -draw "roundrectangle 0,0 $((card_w-1)),$((card_h-1)) $radius,$radius" \
-    \( "$HERE/logo.png" -resize "x$(( card_h * 62 / 100 ))" \) \
+    \( "$tight" -resize "x$(( card_h * 62 / 100 ))" \) \
     -gravity center -composite \
     "PNG32:$HERE/welcome.png"
 
 # productIcon: the mark alone and square, because an icon slot is square and a
 # wide image in one is mostly empty space.
-tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 bash "$SPLASH/mark.sh" "$tmp/mark.png"
 magick "$tmp/mark.png" -trim +repage -resize 460x460 \
     -background none -gravity center -extent 512x512 PNG32:"$HERE/logo-small.png"

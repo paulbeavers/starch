@@ -1,0 +1,27 @@
+/* starch — Calamares branding stylesheet.
+ *
+ * Calamares loads stylesheet.qss from the branding component directory if it
+ * is there (Branding::stylesheet), and applies it on top of the style: block
+ * in branding.desc. Only spacing belongs here: the sidebar colours are set in
+ * branding.desc, and naming them in two places is how they drift apart.
+ *
+ * Object names come from Calamares itself — logoApp, sidebarApp,
+ * sidebarMenuApp, mainApp. A selector that does not match fails silently, so
+ * check against the binary before inventing one:
+ *
+ *     strings /usr/bin/calamares | grep -E '^(sidebar|logo|main)[A-Za-z]*$'
+ */
+
+/* The product logo is the first thing in the sidebar and sat flush against
+ * the top edge of the window, which read as a rendering mistake rather than
+ * a layout. */
+#logoApp {
+    margin-top: 20px;
+    margin-bottom: 12px;
+}
+
+/* And the menu below it should not touch the logo or the bottom edge. */
+#sidebarMenuApp {
+    margin-top: 4px;
+    margin-bottom: 12px;
+}

@@ -71,12 +71,18 @@ printf '%s\n' "$comp_scale" > "$HYPR/.live-compositor-scale"
 read -r win_w win_h < <(awk -v w="$width" -v h="$height" -v s="$comp_scale" 'BEGIN {
     if (s <= 0) s = 1
     lw = w / s;   lh = h / s          # what the compositor actually lays out on
-    ww = lw / 2;  hh = lh / 2
+    ww = lw / 2;  hh = lh * 0.75
     # The room Calamares needs to lay itself out, in logical pixels. Not
     # multiplied by the scale: a logical pixel is already bigger on a scaled
     # output, and multiplying here counts the same density a second time.
+    #
+    # 700 rather than 620, and three quarters of the height rather than half:
+    # the taller pages stack their content above the button row and Calamares
+    # does not scroll it, so at 620 the Install button was off the bottom and
+    # had to be dragged into reach. 700 is also the most that still fits a
+    # 1024x768 or 1366x768 panel under the 0.92 cap below.
     if (ww < 900) ww = 900
-    if (hh < 620) hh = 620
+    if (hh < 700) hh = 700
     # Last, so it wins: never bigger than the screen it has to be centred on.
     if (ww > lw * 0.92) ww = lw * 0.92
     if (hh > lh * 0.92) hh = lh * 0.92

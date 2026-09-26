@@ -4,7 +4,7 @@ componentName: starch
 welcomeStyleCalamares: false
 welcomeExpandingLogo: true
 windowExpanding: normal
-windowSize: 900px,560px
+windowSize: 900px,700px
 windowPlacement: center
 sidebar: widget
 navigation: widget

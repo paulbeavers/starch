@@ -11,7 +11,24 @@
 set -uo pipefail
 
 LOG=/tmp/calamares-session.log
-scale="$(/usr/local/lib/starch/live-scale 2>/dev/null || echo 1)"
+
+# Qt must not scale on top of the compositor. Under cage there was nothing
+# scaling, so QT_SCALE_FACTOR carried the whole job; the medium now boots
+# Hyprland, which scales the output itself, and setting both meant a retina
+# MacBook drew the installer at 2 x 2 — enormous, and larger than the screen.
+#
+# live-prepare records what it actually gave Hyprland. Scale there, or here,
+# never both: if the panel's density did not divide into whole pixels then
+# Hyprland is at 1x and Qt is the only thing left that can make it readable.
+comp_scale=1
+comp_scale_file="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/.live-compositor-scale"
+[[ -r $comp_scale_file ]] && comp_scale="$(cat "$comp_scale_file")"
+
+if [[ $comp_scale == 1 ]]; then
+    scale="$(/usr/local/lib/starch/live-scale 2>/dev/null || echo 1)"
+else
+    scale=1
+fi
 
 # Let the desktop settle first. Calamares is the heaviest thing on the medium
 # and starting it against a compositor that is still bringing up its bar and

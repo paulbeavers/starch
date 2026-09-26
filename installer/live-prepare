@@ -39,27 +39,47 @@ legal=$(awk -v w="$width" -v h="$height" -v s="$scale" 'BEGIN {
     print (x == int(x) && y == int(y)) ? 1 : 0
 }')
 if [[ $legal == 1 ]]; then
+    comp_scale="$scale"
     cat > "$HYPR/monitors.lua" <<LUA
 -- Written by live-prepare at boot, from this machine's panel. Install media
 -- only: an installed system gets its own from install.sh.
 hl.monitor({ output = "", mode = "preferred", position = "auto", scale = $scale })
 LUA
 else
+    comp_scale=1
     rm -f "$HYPR/monitors.lua"
 fi
+
+# What the compositor is actually scaling by — $scale only if it was legal and
+# written above, 1 otherwise. start-installer needs this to decide whether Qt
+# should scale as well, and it must not when Hyprland already is.
+printf '%s\n' "$comp_scale" > "$HYPR/.live-compositor-scale"
 
 # ── the installer window ──────────────────────────────────────────────────────
 # Half the screen, floored at what Calamares needs to lay itself out in — half
 # of 1280x800 is smaller than that — and capped so it never touches the edges.
 # Qt scales the contents, so the floor scales with it.
-read -r win_w win_h < <(awk -v w="$width" -v h="$height" -v s="$scale" 'BEGIN {
+# hl.window_rule sizes are LOGICAL pixels: the compositor divides the panel by
+# its scale and lays windows out in what is left. So all of this has to happen
+# in logical space.
+#
+# It did not. It sized from the raw panel and multiplied the floor by the scale
+# on top, which on a 2880x1800 retina panel at scale 2 asked for an 1800x1240
+# window on a 1440x900 logical screen — wider and taller than the display, so
+# centring put its origin at -180,-170 and the top of the installer, where the
+# fields are, was off the screen entirely.
+read -r win_w win_h < <(awk -v w="$width" -v h="$height" -v s="$comp_scale" 'BEGIN {
     if (s <= 0) s = 1
-    ww = w / 2;  hh = h / 2
-    minw = 900 * s;  minh = 620 * s
-    if (ww < minw) ww = minw
-    if (hh < minh) hh = minh
-    if (ww > w * 0.92) ww = w * 0.92
-    if (hh > h * 0.92) hh = h * 0.92
+    lw = w / s;   lh = h / s          # what the compositor actually lays out on
+    ww = lw / 2;  hh = lh / 2
+    # The room Calamares needs to lay itself out, in logical pixels. Not
+    # multiplied by the scale: a logical pixel is already bigger on a scaled
+    # output, and multiplying here counts the same density a second time.
+    if (ww < 900) ww = 900
+    if (hh < 620) hh = 620
+    # Last, so it wins: never bigger than the screen it has to be centred on.
+    if (ww > lw * 0.92) ww = lw * 0.92
+    if (hh > lh * 0.92) hh = lh * 0.92
     printf "%d %d\n", ww, hh
 }')
 
@@ -71,7 +91,8 @@ read -r win_w win_h < <(awk -v w="$width" -v h="$height" -v s="$scale" 'BEGIN {
 # Lua string first and a regex second, and Lua 5.4 rejects \. as an invalid
 # escape sequence — the whole config would fail to load, not just the rule.
 cat > "$HYPR/live-window.lua" <<LUA
--- Written by live-prepare at boot. ${width}x${height} detected at scale $scale.
+-- Written by live-prepare at boot. ${width}x${height} panel, compositor
+-- scale $comp_scale, so ${win_w}x${win_h} logical.
 hl.window_rule({
     name  = "calamares",
     match = { class = "^(io[.]calamares[.]calamares|[Cc]alamares)\$" },

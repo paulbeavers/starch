@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # Print the scale factor the installer should use on this display.
 #
-# The installer runs full screen under cage, which does no scaling of its own,
-# so on a retina MacBook Calamares renders at 2880x1800 with 1x text — legible
-# only if you lean in. Qt takes QT_SCALE_FACTOR, so the launcher asks this what
-# to set it to.
+# This answers "how dense is this panel", nothing more. Two things consume it
+# and they must not both act: live-prepare gives it to Hyprland as the monitor
+# scale when it divides the resolution into whole pixels, and only when it does
+# not does start-installer fall back to scaling Qt with it instead.
+#
+# It used to be read as "the QT_SCALE_FACTOR", which was right when the medium
+# ran the installer full screen under cage and nothing else scaled. Hyprland
+# does, so taking this as a Qt factor as well drew the installer at scale
+# squared.
 #
 # An installed system does not use this: install.sh measures the display it is
 # installing onto and writes monitors.lua.

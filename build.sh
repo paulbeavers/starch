@@ -509,6 +509,13 @@ hl.on("hyprland.start", function()
     -- the medium, which is exactly where the noise is.
     hl.exec_cmd("bash -c 'sleep 8; ~/.config/hypr/scripts/wallpaper.sh --restore'")
 end)
+
+-- The medium launches the Hyprland binary from .bash_profile rather than
+-- through start-hyprland, for the reason recorded there, so it would
+-- otherwise warn about it on every boot. An installed system never gets here:
+-- the stock hyprland.desktop is Exec=/usr/bin/start-hyprland and the uwsm
+-- entry resolves through that same file.
+hl.config({ misc = { disable_watchdog_warning = true } })
 LIVE
 
 ok "live session gets the desktop config, with the installer on top"
@@ -526,18 +533,20 @@ cat > "$AIR/home/${LIVE_USER}/.bash_profile" <<'EOF'
 # Any other VT is a plain shell, which matters when the desktop is the thing
 # that is broken.
 #
-# start-hyprland, not uwsm and not a display manager. Nothing here waits on
+# Hyprland directly, not uwsm and not a display manager. Nothing here waits on
 # graphical.target, and nothing waits on the network — an earlier attempt at a
 # live desktop put a ninety second countdown on the screen and the cause was
 # cloud-init and networkd-wait-online pulling in network-online.target, not the
 # compositor. Those are off on this medium.
 #
-# start-hyprland is the watchdog the hyprland package ships, and is not a
-# session manager, so none of the above changes. Calling the Hyprland binary
-# straight puts "Hyprland was started without start-hyprland" on the screen of
-# every boot of the medium. An installed system never sees it: the stock
-# hyprland.desktop is Exec=/usr/bin/start-hyprland, and the uwsm entry resolves
-# through that same file, so the medium was the only thing doing it by hand.
+# Not start-hyprland, the watchdog wrapper, although launching the binary
+# directly is what makes Hyprland print "started without start-hyprland".
+# That warning is cosmetic; the wrapper was not. On a 2013 13" MacBook Pro it
+# exited immediately, the line below fell straight through to the text
+# installer, and the machine came up with no desktop at all — while the same
+# medium was fine on a 15" and in a VM. A cosmetic warning is not worth a
+# failure mode that depends on the hardware in front of it. live.lua silences
+# the warning with misc:disable_watchdog_warning instead.
 #
 # If the session cannot start, the text installer still can. That is the whole
 # reason the fallback is here: a graphical failure should cost you the pretty
@@ -551,10 +560,17 @@ if [[ $XDG_VTNR == 1 && -z ${STARCH_SHELL:-} ]]; then
     # in front of us, and write both where hyprland.lua will read them.
     /usr/local/lib/starch/live-prepare
 
-    start-hyprland 2>>/tmp/hyprland-session.log
+    Hyprland 2>>/tmp/hyprland-session.log
 
     # Hyprland exited: either the installer finished and quit the session, or
     # it never started. Either way the text menu is what is left.
+    #
+    # Say which, on the screen. A 13" MacBook Pro that dropped to the text
+    # installer because the compositor would not start gave no hint that
+    # anything had gone wrong, and looked simply like a medium that had no
+    # desktop on it.
+    printf '\n  The desktop did not start; falling back to the text installer.\n'
+    printf '  See /tmp/hyprland-session.log for why.\n\n'
     exec starch-install
 fi
 EOF

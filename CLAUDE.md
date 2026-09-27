@@ -79,6 +79,80 @@ socket.
 into a bug that was fixed the day before, on a stick that was burned from
 yesterday's file. Check the name against `ls -t out/`.
 
+## The pin is automated now, and it is branch-aware
+
+`~/hyprland-setup` has a `post-commit` hook that pushes the commit, moves the
+submodule here to it, commits the bump and pushes that too. It exists because
+forgetting the pin shipped two ISOs missing the fixes they were built for.
+
+It acts **only when both repos are on `main`**. A commit on a release branch
+such as `2026-09` is a fix for something already shipped, and pinning `main` to
+it would drag the next release backwards. Release branches are cut in both
+repos at the same point; `2026-09` records the September ISO exactly, submodule
+pin included.
+
+## The medium launches Hyprland directly, on purpose
+
+Not `start-hyprland`, the watchdog wrapper the hyprland package ships.
+Hyprland warns on every boot when you call the binary, and silencing that
+warning by using the wrapper cost a working desktop: on a 2013 13" MacBook Pro
+it exited immediately, `.bash_profile` fell through to `exec starch-install`,
+and the machine came up with the text installer and no desktop. It was fine on
+a 15" and in a VM, which is how it shipped. `live.lua` sets
+`misc:disable_watchdog_warning` instead, and the fallback now prints why it
+fired.
+
+## Calamares
+
+**Its Wayland app_id is `io.calamares.calamares`**, reverse-DNS. A window rule
+matching `calamares` silently does not apply, which is how the installer came
+up tiled across the whole screen with a correct-looking rule sitting right
+there.
+
+**`hl.window_rule` sizes are logical pixels.** `live-prepare` sized from the
+raw panel and multiplied the floor by the scale as well, so a 2880x1800 retina
+panel at scale 2 asked for an 1800x1240 window on a 1440x900 logical screen —
+centred to a negative origin, with the fields off the top. Every scaled panel
+was affected and only unscaled ones, which is what a VM is, ever worked.
+
+**Qt must not scale on top of the compositor.** `QT_SCALE_FACTOR` carried the
+whole job under cage; Hyprland scales the output itself, so setting both drew
+the installer at scale squared. `live-prepare` records what it actually gave
+Hyprland and `start-installer` scales Qt only when Hyprland is not.
+
+**The sidebar logo's margin belongs in the asset.** `make-logos.sh` trims it
+tight, so its artwork starts at pixel zero and sits flush against the window
+edge. QSS cannot fix that: margins on `#logoApp` clip the wordmark and expose
+the unpainted parent as pale bars, and padding on `#sidebarApp` does nothing at
+all, because Calamares scales the pixmap into the box it gives the label.
+`logo.png` carries 12% transparent margin, vertical only.
+
+**A generated Lua rule is a Lua string before it is a regex.** Lua 5.4 rejects
+`\.` as an invalid escape and fails the whole config, not just the rule, so
+`live-prepare` writes `[.]` for a literal dot.
+
+## Editing a script while a build is running
+
+bash reads a script incrementally, so a running build picks up edits mid-file
+and dies on a half-written line. `rename()` is atomic and a running process
+keeps its descriptor on the old inode — so write the new version to a temp file
+in the same directory and `mv` it over. Verified by inode number before and
+after. The same applies to anything `build.sh` reads while it runs.
+
+## Publishing
+
+`./tools/deploy-web.sh` publishes `web/` and the newest ISO to S3, versioned by
+month (`starch-2026.09-x86_64.iso`) with a `latest` alias made by server-side
+copy. It skips the upload when the local sha256 matches the one published
+beside the last release, and invalidates CloudFront — uploading to S3 is not
+publishing.
+
+`./tools/deploy-cdn.sh` owns bucket access: certificate, distribution, Origin
+Access Control, the policy naming that one distribution, and the Route 53
+alias. Only it writes the bucket policy; a publish script that also wrote one
+would undo the lockdown every time someone fixed a typo. Both take
+`--dry-run`.
+
 ## Do not run sudo from a tool call
 
 There is no TTY, so sudo cannot prompt, and PAM counts each failure. With

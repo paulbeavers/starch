@@ -155,55 +155,65 @@
 
 <section>
   <div class="wrap">
-    <h2><span class="n">04</span>Settings, without editing config files</h2>
+    <h2><span class="n">04</span>Use the app, or edit the files</h2>
     <p>
-      Hyprland is configured in files, and that is the right answer right up
-      until you want to change your display scale. starch ships
-      <strong>starch-config</strong>, a settings app on
-      <code>SUPER&nbsp;+&nbsp;I</code>, for the handful of things that are
+      Hyprland is configured in files, and starch does not hide that. It also
+      ships <strong>starch-config</strong>, a settings app on
+      <code>SUPER&nbsp;+&nbsp;I</code>, covering the settings that are
       genuinely awkward to hand-edit: display scale, resolution and refresh
       rate, idle and lock timeouts, what the lid does, keyboard and touchpad
       behaviour, and the theme, wallpaper, cursor and font.
     </p>
     <p>
-      Nothing requires you to use it — these are Hyprland's own settings, in
-      Hyprland's own files. It exists because a few of them are genuinely
-      awkward to get right by hand, and it is careful about how it writes
-      them.
+      <strong>Both routes are first-class</strong>, because they are the same
+      files. The app writes ordinary Hyprland configuration you can open, read
+      and change by hand afterwards — and if you would rather never open it,
+      nothing needs it.
     </p>
 
     <div class="cards">
       <div class="card">
-        <h3>It never edits your files</h3>
+        <h3>It owns three files</h3>
         <p>
-          It owns three generated files outright and rewrites them whole,
-          keeping the previous version as <code>.bak</code>. Nothing you wrote
-          is touched.
+          <code>monitors.lua</code>, <code>hypridle.conf</code> and
+          <code>settings.lua</code> — generated, rewritten whole, previous
+          version kept as <code>.bak</code>.
         </p>
       </div>
       <div class="card">
-        <h3>It loses to you</h3>
+        <h3>It never touches yours</h3>
         <p>
-          Its settings load last, so they override the defaults without either
-          file knowing about the other. Delete them and you are back to the
-          shipped configuration.
+          <code>input.lua</code>, <code>theme.lua</code>,
+          <code>keybinds.lua</code> and the rest are hand-written and stay that
+          way. Edit them freely.
         </p>
       </div>
       <div class="card">
-        <h3>It offers only what works</h3>
+        <h3>Deleting it reverts</h3>
         <p>
-          A display scale is legal only if it divides the resolution into whole
-          pixels. Hyprland accepts any number and then quietly snaps to one
-          that does — so a config can say 1.5 while the session runs at 1.6.
-          The menu lists the scales that are actually legal for your mode.
+          <code>settings.lua</code> loads last, so it overrides the defaults.
+          Remove it and you are back to the shipped configuration.
         </p>
       </div>
     </div>
 
     <p style="margin-top:26px">
-      Everything it writes is a plain text file next to the ones you edit
-      yourself. The app is a convenience, not a layer — you can always open the
-      file instead.
+      Change the key repeat rate in the app and it writes exactly one key —
+      the other twenty input settings in <code>input.lua</code> are untouched,
+      because neither file has to know about the other:
+    </p>
+<pre><span class="c">-- ~/.config/hypr/settings.lua, written by starch-config</span>
+hl.config({
+    input = {
+        repeat_rate = 40,
+    },
+})</pre>
+    <p style="margin-top:22px">
+      One setting is worth the app on its own. A display scale is legal only if
+      it divides the resolution into whole pixels; Hyprland accepts any number
+      and then quietly snaps to one that does, so a config can say 1.5 while
+      the session runs at 1.6. The scale menu lists only the values that are
+      actually legal for your mode.
     </p>
   </div>
 </section>

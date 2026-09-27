@@ -140,16 +140,6 @@ section > .wrap > p { max-width: var(--measure); color: var(--subtext); }
 
 section > .wrap > p strong { color: var(--text); font-weight: 600; }
 
-.pull {
-  max-width: var(--measure);
-  margin: 26px 0 0;
-  padding: 16px 20px;
-  border-left: 3px solid var(--sapphire);
-  background: rgba(24, 24, 37, .7);
-  border-radius: 0 8px 8px 0;
-  color: var(--text);
-}
-
 /* ── the four refusals ────────────────────────────────────────────────── */
 
 .cards {

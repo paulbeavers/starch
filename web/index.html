@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>starch — Start Arch</title>
+<meta name="description" content="Install media that gets you to a working Arch + Hyprland desktop, and then stops existing.">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="stylesheet" href="style.css">
+
+<meta property="og:title" content="starch — Start Arch">
+<meta property="og:description" content="Install media that gets you to a working Arch + Hyprland desktop, and then stops existing.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="assets/starch-logo.png">
+</head>
+
+<body>
+
+<!--
+  ─────────────────────────────────────────────────────────────────────────────
+  THE DOWNLOAD LINK LIVES IN EXACTLY TWO PLACES, BOTH MARKED "EDIT ME".
+  Point them at the S3 object for the current ISO and update the size/date
+  next to the button. Nothing else needs touching to publish a new build.
+  ─────────────────────────────────────────────────────────────────────────────
+-->
+
+<header>
+  <div class="wrap">
+    <img class="mark" src="assets/starch-mark.png" alt="The starch mark: two open strokes forming a mountain">
+    <h1>starch</h1>
+    <p class="tagline">Start Arch</p>
+    <p class="lede">
+      Install media that gets you to a working Arch&nbsp;+&nbsp;Hyprland desktop,
+      and then stops existing.
+    </p>
+
+    <div class="get">
+      <!-- EDIT ME: the S3 object URL for the current ISO -->
+      <a class="btn" href="https://REPLACE-ME.s3.amazonaws.com/starch-x86_64.iso">
+        Download the ISO
+      </a>
+      <p class="meta">
+        <span>x86_64</span><span>UEFI &amp; BIOS</span><span>~3&nbsp;GB</span>
+      </p>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2><span class="n">01</span>The idea</h2>
+    <p>
+      Arch is worth running and painful to start. Hyprland is worth running and
+      fiddly to configure. starch does that first hour for you — it boots a
+      finished desktop, installs it to your disk, and gets out of the way.
+    </p>
+    <p class="pull">
+      An opinionated setup that keeps being opinionated owns your system.
+      starch hands it over.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="n">02</span>It does not stay</h2>
+    <p>
+      Once the install finishes there is no starch on the machine. This is the
+      part that matters, and it is a deliberate constraint rather than a
+      feature that was never written:
+    </p>
+
+    <div class="cards">
+      <div class="card">
+        <h3>No custom repository</h3>
+        <p>Every package comes from the official Arch repositories.</p>
+      </div>
+      <div class="card">
+        <h3>No branding</h3>
+        <p><code>/etc/os-release</code> says Arch, because it is Arch.</p>
+      </div>
+      <div class="card">
+        <h3>No hooks or agents</h3>
+        <p>Nothing runs that you did not put there. No self-updates.</p>
+      </div>
+      <div class="card">
+        <h3>No framework to learn</h3>
+        <p>
+          Updates are <code>pacman -Syu</code>, the same as any Arch install,
+          and the Arch wiki is the documentation.
+        </p>
+      </div>
+    </div>
+
+    <p style="margin-top:26px">
+      Everything it configured is a plain file you can read, edit or delete,
+      and the comments in those files explain what each choice does and why —
+      so the setup is a starting point you can learn from rather than a black
+      box you maintain around. The configuration lands in
+      <code>~/hyprland-setup</code>, exactly where it would be if you had
+      cloned it yourself. Keep it to re-run pieces later, or delete it;
+      nothing depends on it being there.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="n">03</span>What you get</h2>
+    <p>
+      A Wayland desktop that is configured rather than assembled — 136 packages
+      from the official repositories, wired together and commented.
+    </p>
+
+    <table class="kit">
+      <tbody>
+        <tr><th>Compositor</th><td>hyprland, launched through uwsm</td></tr>
+        <tr><th>Login</th><td>greetd + tuigreet</td></tr>
+        <tr><th>Bar</th><td>waybar</td></tr>
+        <tr><th>Launcher</th><td>wofi</td></tr>
+        <tr><th>Notifications</th><td>mako</td></tr>
+        <tr><th>Terminal</th><td>kitty</td></tr>
+        <tr><th>Browser</th><td>firefox</td></tr>
+        <tr><th>Editors</th><td>neovim, vim</td></tr>
+        <tr><th>Files</th><td>thunar + gvfs + udiskie</td></tr>
+        <tr><th>Lock, idle, wallpaper</th><td>hyprlock, hypridle, hyprpaper</td></tr>
+        <tr><th>Audio</th><td>PipeWire + WirePlumber</td></tr>
+        <tr><th>Graphics</th><td>Mesa, plus the driver for your detected card</td></tr>
+        <tr><th>Screenshots</th><td>grim + slurp + swappy</td></tr>
+        <tr><th>Clipboard</th><td>wl-clipboard + cliphist</td></tr>
+        <tr><th>On-screen display</th><td>swayosd, for volume and brightness</td></tr>
+        <tr><th>Settings</th><td>starch-config — scale, idle, input, theme</td></tr>
+        <tr><th>Themes</th><td>14, switched live with <code>SUPER+SHIFT+T</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="n">04</span>How the install works</h2>
+    <p>
+      The ISO is a live desktop that installs itself. tty1 starts Hyprland, and
+      the session starts the installer. That is not decoration: it is what gives
+      the medium <strong>a network applet, a terminal and a file manager</strong>,
+      so you can join a wifi network and check the machine works before
+      committing a disk to it. An installer alone cannot do any of that.
+    </p>
+    <p>
+      Quitting the installer leaves the desktop running. Logging out, or a
+      desktop that will not start at all, falls through to a text menu with the
+      older installer, a shell and this boot's log.
+    </p>
+    <p>
+      The installer copies the live filesystem onto the target — the same image
+      you have been using, so <strong>what gets installed is what you
+      tested</strong> — and then turns that copy into an ordinary system. The
+      whole install is a file copy: it needs no network, on any supported
+      hardware.
+    </p>
+    <p>
+      That is why the ISO is around 3&nbsp;GB. It carries the finished desktop,
+      every graphics vendor's driver and the Broadcom wireless one, because it
+      cannot know what it will be installed onto. Once the hardware is known,
+      the drivers it rules out are removed — an AMD laptop does not keep
+      900&nbsp;MB of NVIDIA userspace.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="n">05</span>Write it to a USB stick</h2>
+    <p>
+      Replace <code>/dev/sdX</code> with your stick, and check it is a block
+      device before you write to it — the guard below is not decoration, it is
+      the difference between writing to a disk and writing to a file.
+    </p>
+<pre><span class="c"># confirm which device is the stick</span>
+lsblk -o NAME,SIZE,TYPE,RM,MODEL
+
+DEV=/dev/sdX
+<span class="c"># refuse to continue unless that really is a block device</span>
+[ -b "$DEV" ] || { echo "REFUSING: $DEV is not a block device"; exit 1; }
+
+sudo dd if=starch-x86_64.iso of="$DEV" bs=4M status=progress oflag=direct conv=fsync
+sync</pre>
+    <p style="margin-top:22px">
+      Boot it, and the desktop comes up with the installer on top of it.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="n">06</span>Build it yourself</h2>
+    <p>
+      The ISO is reproducible from two repositories: the builder, and the
+      desktop configuration it pins as a submodule. The split keeps the desktop
+      usable on its own — clone that repository and run <code>install.sh</code>
+      on an existing Arch system, no ISO involved.
+    </p>
+<pre><span class="c"># the builder, with the desktop configuration it pins</span>
+git clone --recurse-submodules https://github.com/paulbeavers/starch.git
+cd starch
+
+sudo pacman -S archiso base-devel
+./build-all.sh</pre>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="n">07</span>Get it</h2>
+    <p>
+      One file. Write it to a stick, boot it, and decide whether you like the
+      desktop before you install anything.
+    </p>
+    <div class="get" style="align-items:flex-start;margin-top:22px">
+      <!-- EDIT ME: the same S3 object URL as the button at the top -->
+      <a class="btn" href="https://REPLACE-ME.s3.amazonaws.com/starch-x86_64.iso">
+        Download the ISO
+      </a>
+      <p class="meta">
+        <span>x86_64</span><span>UEFI &amp; BIOS</span><span>~3&nbsp;GB</span>
+      </p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/paulbeavers/starch">starch on GitHub</a>
+      <a href="https://github.com/paulbeavers/hyprland-setup">the desktop configuration</a>
+      <a href="https://wiki.archlinux.org/">Arch wiki</a>
+    </div>
+    <p style="margin:0">
+      starch is install media for Arch Linux. It is not affiliated with the
+      Arch Linux project. Once the install is finished, the machine is running
+      Arch, and the Arch wiki is its documentation.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

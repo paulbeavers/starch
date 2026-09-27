@@ -222,7 +222,6 @@ pre::-webkit-scrollbar-thumb:hover { background: var(--overlay); }
 pre { scrollbar-width: thin; scrollbar-color: var(--surface1) var(--crust); }
 
 pre .c { color: var(--overlay); }
-pre .p { color: var(--green); }
 
 code {
   font-family: var(--mono);

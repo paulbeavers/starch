@@ -193,17 +193,6 @@
     </div>
 
     <p style="margin-top:26px">
-      Change the key repeat rate in the app and it writes exactly one key —
-      the other twenty input settings in <code>input.lua</code> are untouched,
-      because neither file has to know about the other:
-    </p>
-<pre><span class="c">-- ~/.config/hypr/settings.lua, written by starch-config</span>
-hl.config({
-    input = {
-        repeat_rate = 40,
-    },
-})</pre>
-    <p style="margin-top:22px">
       One setting is worth the app on its own. A display scale is legal only if
       it divides the resolution into whole pixels; Hyprland accepts any number
       and then quietly snaps to one that does, so a config can say 1.5 while

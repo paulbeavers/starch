@@ -219,39 +219,7 @@ hl.config({
 
 <section>
   <div class="wrap">
-    <h2><span class="n">05</span>How the install works</h2>
-    <p>
-      The ISO is a live desktop that installs itself. tty1 starts Hyprland, and
-      the session starts the installer. That is not decoration: it is what gives
-      the medium <strong>a network applet, a terminal and a file manager</strong>,
-      so you can join a wifi network and check the machine works before
-      committing a disk to it. An installer alone cannot do any of that.
-    </p>
-    <p>
-      Quitting the installer leaves the desktop running. Logging out, or a
-      desktop that will not start at all, falls through to a text menu with the
-      older installer, a shell and this boot's log.
-    </p>
-    <p>
-      The installer copies the live filesystem onto the target — the same image
-      you have been using, so <strong>what gets installed is what you
-      tested</strong> — and then turns that copy into an ordinary system. The
-      whole install is a file copy: it needs no network, on any supported
-      hardware.
-    </p>
-    <p>
-      That is why the ISO is around 3&nbsp;GB. It carries the finished desktop,
-      every graphics vendor's driver and the Broadcom wireless one, because it
-      cannot know what it will be installed onto. Once the hardware is known,
-      the drivers it rules out are removed — an AMD laptop does not keep
-      900&nbsp;MB of NVIDIA userspace.
-    </p>
-  </div>
-</section>
-
-<section>
-  <div class="wrap">
-    <h2><span class="n">06</span>Write it to a USB stick</h2>
+    <h2><span class="n">05</span>Write it to a USB stick</h2>
     <p>
       Replace <code>/dev/sdX</code> with your stick, and check it is a block
       device before you write to it — the guard below is not decoration, it is
@@ -274,7 +242,7 @@ sync</pre>
 
 <section>
   <div class="wrap">
-    <h2><span class="n">07</span>Get it</h2>
+    <h2><span class="n">06</span>Get it</h2>
     <p>
       One file. Write it to a stick, boot it, and decide whether you like the
       desktop before you install anything.

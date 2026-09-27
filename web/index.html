@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>starch — Start Arch</title>
-<meta name="description" content="Install media that gets you to a working Arch + Hyprland desktop, and then stops existing.">
+<meta name="description" content="A configured Arch + Hyprland desktop, installed from one image — without replacing how Arch manages packages or how Hyprland is configured.">
 <link rel="icon" type="image/png" href="assets/favicon.png">
 <link rel="stylesheet" href="style.css">
 
 <meta property="og:title" content="starch — Start Arch">
-<meta property="og:description" content="Install media that gets you to a working Arch + Hyprland desktop, and then stops existing.">
+<meta property="og:description" content="A configured Arch + Hyprland desktop, installed from one image — without replacing how Arch manages packages or how Hyprland is configured.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="assets/starch-logo.png">
 </head>
@@ -30,8 +30,9 @@
     <h1>starch</h1>
     <p class="tagline">Start Arch</p>
     <p class="lede">
-      Install media that gets you to a working Arch&nbsp;+&nbsp;Hyprland desktop,
-      and then stops existing.
+      A configured Arch&nbsp;+&nbsp;Hyprland desktop, installed from one image —
+      without replacing how Arch manages packages or how Hyprland is
+      configured.
     </p>
 
     <div class="get">
@@ -50,24 +51,36 @@
   <div class="wrap">
     <h2><span class="n">01</span>The idea</h2>
     <p>
-      Arch is worth running and painful to start. Hyprland is worth running and
-      fiddly to configure. starch does that first hour for you — it boots a
-      finished desktop, installs it to your disk, and gets out of the way.
+      Arch gives you a great deal: a current system, an honest package manager
+      and the best documentation in Linux. What it does not give you is a
+      desktop. You are handed a console and the job of assembling one.
+    </p>
+    <p>
+      Hyprland is the same trade one level up. It is an excellent compositor
+      and it ships almost no opinions — a bar, a launcher, notifications, a
+      lock screen, idle handling, screenshots, clipboard history and audio are
+      all separate programs you choose, install and wire together yourself.
+      That assembly is the work, and it is much the same every time.
+    </p>
+    <p>
+      starch does the assembly. It boots a desktop that is already wired
+      together, writes it to your disk, and leaves the system working the way
+      Arch and Hyprland normally do.
     </p>
     <p class="pull">
-      An opinionated setup that keeps being opinionated owns your system.
-      starch hands it over.
+      starch is a starting point, not a layer. It sets the desktop up; it does
+      not stand between you and the system afterwards.
     </p>
   </div>
 </section>
 
 <section>
   <div class="wrap">
-    <h2><span class="n">02</span>It does not stay</h2>
+    <h2><span class="n">02</span>It does not take over</h2>
     <p>
-      Once the install finishes there is no starch on the machine. This is the
-      part that matters, and it is a deliberate constraint rather than a
-      feature that was never written:
+      starch stays on the machine — the desktop it configured is yours to keep,
+      change or throw away. What it does not do is <strong>replace how Arch and
+      Hyprland already work</strong>:
     </p>
 
     <div class="cards">
@@ -93,13 +106,17 @@
     </div>
 
     <p style="margin-top:26px">
-      Everything it configured is a plain file you can read, edit or delete,
-      and the comments in those files explain what each choice does and why —
-      so the setup is a starting point you can learn from rather than a black
-      box you maintain around. The configuration lands in
-      <code>~/hyprland-setup</code>, exactly where it would be if you had
-      cloned it yourself. Keep it to re-run pieces later, or delete it;
-      nothing depends on it being there.
+      The desktop it leaves is a set of plain files you can read, edit or
+      delete, with comments explaining what each choice does and why — a
+      starting point you can learn from rather than a black box you maintain
+      around. The configuration lands in <code>~/hyprland-setup</code>, exactly
+      where it would be if you had cloned it yourself. Keep it to re-run pieces
+      later, or delete it; nothing depends on it being there.
+    </p>
+    <p>
+      Packages are still <code>pacman</code>'s. Configuration is still
+      Hyprland's own files. Nothing was wrapped, and nothing needs starch to
+      keep running.
     </p>
   </div>
 </section>
@@ -138,7 +155,62 @@
 
 <section>
   <div class="wrap">
-    <h2><span class="n">04</span>How the install works</h2>
+    <h2><span class="n">04</span>Settings, without editing config files</h2>
+    <p>
+      Hyprland is configured in files, and that is the right answer right up
+      until you want to change your display scale. starch ships
+      <strong>starch-config</strong>, a settings app on
+      <code>SUPER&nbsp;+&nbsp;I</code>, for the handful of things that are
+      genuinely awkward to hand-edit: display scale, resolution and refresh
+      rate, idle and lock timeouts, what the lid does, keyboard and touchpad
+      behaviour, and the theme, wallpaper, cursor and font.
+    </p>
+    <p>
+      Nothing requires you to use it — these are Hyprland's own settings, in
+      Hyprland's own files. It exists because a few of them are genuinely
+      awkward to get right by hand, and it is careful about how it writes
+      them.
+    </p>
+
+    <div class="cards">
+      <div class="card">
+        <h3>It never edits your files</h3>
+        <p>
+          It owns three generated files outright and rewrites them whole,
+          keeping the previous version as <code>.bak</code>. Nothing you wrote
+          is touched.
+        </p>
+      </div>
+      <div class="card">
+        <h3>It loses to you</h3>
+        <p>
+          Its settings load last, so they override the defaults without either
+          file knowing about the other. Delete them and you are back to the
+          shipped configuration.
+        </p>
+      </div>
+      <div class="card">
+        <h3>It offers only what works</h3>
+        <p>
+          A display scale is legal only if it divides the resolution into whole
+          pixels. Hyprland accepts any number and then quietly snaps to one
+          that does — so a config can say 1.5 while the session runs at 1.6.
+          The menu lists the scales that are actually legal for your mode.
+        </p>
+      </div>
+    </div>
+
+    <p style="margin-top:26px">
+      Everything it writes is a plain text file next to the ones you edit
+      yourself. The app is a convenience, not a layer — you can always open the
+      file instead.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="n">05</span>How the install works</h2>
     <p>
       The ISO is a live desktop that installs itself. tty1 starts Hyprland, and
       the session starts the installer. That is not decoration: it is what gives
@@ -170,7 +242,7 @@
 
 <section>
   <div class="wrap">
-    <h2><span class="n">05</span>Write it to a USB stick</h2>
+    <h2><span class="n">06</span>Write it to a USB stick</h2>
     <p>
       Replace <code>/dev/sdX</code> with your stick, and check it is a block
       device before you write to it — the guard below is not decoration, it is
@@ -193,7 +265,7 @@ sync</pre>
 
 <section>
   <div class="wrap">
-    <h2><span class="n">06</span>Get it</h2>
+    <h2><span class="n">07</span>Get it</h2>
     <p>
       One file. Write it to a stick, boot it, and decide whether you like the
       desktop before you install anything.

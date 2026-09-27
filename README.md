@@ -23,9 +23,12 @@ file you can read, edit or delete, and the comments in those files explain what
 each choice does and why — so the setup is a starting point you can learn from
 rather than a black box you maintain around.
 
-The repo lands in `~/hyprland-setup`, exactly where it would be if you had
-cloned it yourself. Keep it to re-run pieces later, or delete it; nothing
-depends on it being there.
+The configuration lands in `~/.config`, where Hyprland and everything else
+look for it. The repository it came from stays at
+`/usr/local/share/hyprland-setup` — `configure-desktop` runs `install.sh
+--for-user` out of there and leaves it in place — so the source of every
+choice is readable on the installed machine and `install.sh` can be re-run.
+Delete that directory and nothing stops working.
 
 ## Layout
 

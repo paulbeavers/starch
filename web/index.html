@@ -109,9 +109,12 @@
       The desktop it leaves is a set of plain files you can read, edit or
       delete, with comments explaining what each choice does and why — a
       starting point you can learn from rather than a black box you maintain
-      around. The configuration lands in <code>~/hyprland-setup</code>, exactly
-      where it would be if you had cloned it yourself. Keep it to re-run pieces
-      later, or delete it; nothing depends on it being there.
+      around. The configuration itself lives where Hyprland and everything else
+      look for it, in <code>~/.config</code>, and the repository it was
+      installed from stays at
+      <code>/usr/local/share/hyprland-setup</code> so you can read the source of
+      any of it or re-run <code>install.sh</code> later. Delete that directory
+      and nothing stops working.
     </p>
     <p>
       Packages are still <code>pacman</code>'s. Configuration is still

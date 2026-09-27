@@ -150,6 +150,58 @@
 
 <section>
   <div class="wrap">
+    <h2>Old hardware, and new</h2>
+    <p>
+      The image carries every graphics vendor's driver and the Broadcom
+      wireless one, because it cannot know what it will be installed onto.
+      Once the hardware is known, what it rules out is removed — an AMD laptop
+      does not keep 900&nbsp;MB of NVIDIA userspace.
+    </p>
+
+    <div class="cards">
+      <div class="card">
+        <h3>Intel MacBooks, pre-T2</h3>
+        <p>
+          The Broadcom wireless in a 2011&ndash;2015 MacBook Pro is the usual
+          reason Linux comes up with no network. The card is identified by its
+          PCI id and given the driver that actually drives it, with the other
+          one kept out of the way. BCM20702 bluetooth firmware ships too.
+        </p>
+      </div>
+      <div class="card">
+        <h3>NVIDIA</h3>
+        <p>
+          <code>nvidia-open-dkms</code> with the pieces Wayland needs —
+          <code>egl-wayland</code> and <code>libva-nvidia-driver</code> — not
+          just the kernel module.
+        </p>
+      </div>
+      <div class="card">
+        <h3>AMD and Intel</h3>
+        <p>
+          Mesa with <code>vulkan-radeon</code> or <code>vulkan-intel</code>,
+          and <code>intel-media-driver</code> for hardware video decode on
+          Broadwell and later.
+        </p>
+      </div>
+    </div>
+
+    <p style="margin-top:26px">
+      Hyprland is a compositor, a bar and a launcher rather than a desktop
+      environment, so there is not much running that you did not ask for. The
+      same image is the right one for a 2013 laptop and for a current
+      workstation.
+    </p>
+    <p>
+      <strong>T2 Macs are not supported.</strong> Models from 2018 on need
+      kernel patches for their keyboard, trackpad and audio that this image
+      does not carry, and no amount of driver detection substitutes for them.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <h2>Use the app, or edit the files</h2>
     <p>
       Hyprland is configured in files, and starch does not hide that. It also

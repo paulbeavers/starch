@@ -193,25 +193,7 @@ sync</pre>
 
 <section>
   <div class="wrap">
-    <h2><span class="n">06</span>Build it yourself</h2>
-    <p>
-      The ISO is reproducible from two repositories: the builder, and the
-      desktop configuration it pins as a submodule. The split keeps the desktop
-      usable on its own — clone that repository and run <code>install.sh</code>
-      on an existing Arch system, no ISO involved.
-    </p>
-<pre><span class="c"># the builder, with the desktop configuration it pins</span>
-git clone --recurse-submodules https://github.com/paulbeavers/starch.git
-cd starch
-
-sudo pacman -S archiso base-devel
-./build-all.sh</pre>
-  </div>
-</section>
-
-<section>
-  <div class="wrap">
-    <h2><span class="n">07</span>Get it</h2>
+    <h2><span class="n">06</span>Get it</h2>
     <p>
       One file. Write it to a stick, boot it, and decide whether you like the
       desktop before you install anything.

@@ -494,13 +494,12 @@ hl.on("hyprland.start", function()
     -- depends on the sudoers policy and can drop one without saying so.
     hl.exec_cmd("/usr/local/lib/starch/start-installer")
 
-    -- No second wallpaper pass here. There was one, eight seconds in, and it
-    -- made things worse: it ran while autostart.lua's own --restore was still
-    -- waiting, and the fallback in wallpaper.sh restarted hyprpaper, so the
-    -- two calls killed each other's daemon in turn. /tmp/wallpaper.log showed
-    -- two "did not answer in 10s" entries seven seconds apart, which a single
-    -- caller cannot produce. wallpaper.sh now waits longer and never kills a
-    -- hyprpaper that is already running; a second caller is not the fix.
+    -- No second wallpaper pass here, and no longer any reason for one.
+    -- autostart.lua's --restore runs swaybg with the image as an argument, so
+    -- there is no daemon to be waiting for. The pass that used to be here was
+    -- added when the medium came up bare, and made it worse: it ran while the
+    -- first --restore was still waiting on hyprpaper and the two killed each
+    -- other's daemon in turn.
 end)
 
 -- The medium launches the Hyprland binary from .bash_profile rather than
@@ -662,8 +661,9 @@ if [ -x /home/${LIVE_USER}/.config/hypr/scripts/theme.sh ]; then
         || echo "  theme.sh failed; the live bar will be unstyled"
 fi
 
-# And its wallpaper, by the same argument: hyprpaper.conf and the lock screen
-# are both rendered from the recorded choice.
+# And its wallpaper, by the same argument: the recorded choice and the lock
+# screen are both written from it. --no-reload, so nothing tries to draw
+# anything in a chroot; the live session's autostart runs swaybg at boot.
 if [ -x /home/${LIVE_USER}/.config/hypr/scripts/wallpaper.sh ] && [ -f "${LIVE_WALL}" ]; then
     HOME=/home/${LIVE_USER} XDG_CONFIG_HOME=/home/${LIVE_USER}/.config \
         /home/${LIVE_USER}/.config/hypr/scripts/wallpaper.sh --set "${LIVE_WALL}" --no-reload \

@@ -112,10 +112,10 @@ LUA
 # gets the ultrawide layout, which is laid out for the extra width rather than
 # being the 16:9 one stretched across it.
 #
-# --no-reload because nothing is running yet; Hyprland starts moments from now
-# and hyprpaper reads the file it just rewrote. Non-fatal: a medium with the
-# wrong-aspect wallpaper is a cosmetic problem, a medium that will not boot is
-# not.
+# --no-reload because nothing is running yet: this only records the choice, and
+# autostart.lua's --restore is what runs swaybg with it once the session is up.
+# Non-fatal: a medium with the wrong-aspect wallpaper is a cosmetic problem, a
+# medium that will not boot is not.
 if (( width * 10 > height * 19 )); then
     wide="$(ls "$HOME"/Pictures/wallpapers/*-5120x2160.png 2>/dev/null | head -1)"
     if [[ -n $wide && -x $HYPR/scripts/wallpaper.sh ]]; then

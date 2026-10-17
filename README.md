@@ -25,7 +25,7 @@ rather than a black box you maintain around.
 
 The configuration lands in `~/.config`, where Hyprland and everything else
 look for it. The repository it came from stays at
-`/usr/local/share/hyprland-setup` — `configure-desktop` runs `install.sh
+`/usr/local/share/lucent` — `configure-desktop` runs `install.sh
 --for-user` out of there and leaves it in place — so the source of every
 choice is readable on the installed machine and `install.sh` can be re-run.
 Delete that directory and nothing stops working.
@@ -42,7 +42,7 @@ calamares/            installer sequence, module config and branding
 installer/            scripts the install runs, plus the text-menu fallback
 tools/build-aur.sh    builds what the official repos do not carry
 test-boot.sh          boots the result in QEMU
-hyprland-setup/       submodule: the desktop install and config
+lucent/               submodule: the desktop install and config
 localrepo/            built packages (gitignored; make it with build-aur.sh)
 ```
 
@@ -75,8 +75,8 @@ git submodule update --init
 Update the desktop config an ISO will ship:
 
 ```bash
-git -C hyprland-setup pull
-git add hyprland-setup && git commit -m "Bump hyprland-setup"
+git -C lucent pull
+git add lucent && git commit -m "Bump lucent"
 ```
 
 ## Build
@@ -87,7 +87,7 @@ sudo pacman -S archiso base-devel   # once
 ```
 
 `build-all.sh` takes no options — it runs the two builds in order and stops at
-the first failure. It also checks out the `hyprland-setup` submodule if you
+the first failure. It also checks out the `lucent` submodule if you
 cloned without `--recurse-submodules`. Run it as yourself: `makepkg` refuses to
 run as root, so the script calls `sudo` for the ISO step alone and asks then.
 The scripts underneath keep their own options for when you need them, listed
@@ -178,7 +178,7 @@ the worst possible place to find out.
 | Calamares | `localrepo/`, built by `tools/build-aur.sh` |
 | Calamares config | `calamares/` — sequence, modules, branding |
 | Post-install scripts | `installer/` — run in the target during the install |
-| The desktop repo | the `hyprland-setup` submodule, by allowlist |
+| The desktop repo | the `lucent` submodule, by allowlist |
 | Live user | `live`, uid 1500 so the installed user gets 1000 |
 | Boot behaviour | tty1 starts the desktop; other VTs are plain shells |
 

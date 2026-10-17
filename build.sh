@@ -27,7 +27,7 @@ HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # The desktop half lives in its own repository, pinned here as a submodule, so
 # an ISO is reproducible from this repo's history: the commit recorded here is
 # exactly the config that goes on the medium.
-REPO="$HERE/hyprland-setup"
+REPO="$HERE/lucent"
 RELENG="${RELENG:-/usr/share/archiso/configs/releng}"
 WORK="${WORK:-$HERE/work}"
 PROFILE="$WORK/profile"
@@ -41,7 +41,7 @@ LOCALDB=starch-local
 LIVE_USER="${LIVE_USER:-live}"
 ISO_NAME="starch"
 ISO_LABEL="STARCH_$(date +%Y%m)"
-ISO_PUBLISHER="starch <https://github.com/paulbeavers/hyprland-setup>"
+ISO_PUBLISHER="starch <https://github.com/paulbeavers/lucent>"
 ISO_APPLICATION="starch — Arch + Hyprland install medium"
 
 C_B=$'\e[34m'; C_G=$'\e[32m'; C_Y=$'\e[33m'; C_R=$'\e[31m'; C_0=$'\e[0m'
@@ -77,13 +77,13 @@ fi
 # ── prerequisites ─────────────────────────────────────────────────────────────
 step "Checking prerequisites"
 command -v mkarchiso >/dev/null || die "archiso is not installed:  sudo pacman -S archiso"
-[[ -f $REPO/install.sh ]] || die "the hyprland-setup submodule is empty — run: git submodule update --init"
+[[ -f $REPO/install.sh ]] || die "the lucent submodule is empty — run: git submodule update --init"
 
 # The desktop half is a submodule, and three things can disagree about which
 # version that is:
 #
 #   1. the commit recorded in starch's history
-#   2. the files actually checked out in hyprland-setup/
+#   2. the files actually checked out in lucent/
 #   3. what is on the branch at origin
 #
 # `git pull` updates 1 and never 2, and knows nothing about a second clone of
@@ -96,14 +96,14 @@ command -v mkarchiso >/dev/null || die "archiso is not installed:  sudo pacman -
 # has moved on, because building an older pin on purpose is a reasonable thing
 # to do.
 if [[ -d $REPO/.git || -f $REPO/.git ]] && command -v git >/dev/null; then
-    pinned="$(git -C "$HERE" rev-parse HEAD:hyprland-setup 2>/dev/null || true)"
+    pinned="$(git -C "$HERE" rev-parse HEAD:lucent 2>/dev/null || true)"
     actual="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)"
 
     if [[ -n $pinned && -n $actual && $pinned != "$actual" ]]; then
-        die "hyprland-setup is checked out at ${actual:0:7}, but this commit records ${pinned:0:7}.
+        die "lucent is checked out at ${actual:0:7}, but this commit records ${pinned:0:7}.
     The ISO would be built from files no commit describes. Pick one:
-      git submodule update hyprland-setup                 # use the recorded ${pinned:0:7}
-      git submodule update --remote hyprland-setup && git add hyprland-setup && git commit
+      git submodule update lucent                 # use the recorded ${pinned:0:7}
+      git submodule update --remote lucent && git add lucent && git commit
                                                            # take the newest and record it"
     fi
 
@@ -115,16 +115,16 @@ if [[ -d $REPO/.git || -f $REPO/.git ]] && command -v git >/dev/null; then
         if [[ -n $remote && -n $actual && $remote != "$actual" ]] \
            && git -C "$REPO" merge-base --is-ancestor "$actual" "$remote" 2>/dev/null; then
             behind="$(git -C "$REPO" rev-list --count "$actual".."$remote" 2>/dev/null || echo '?')"
-            warn "hyprland-setup is $behind commit(s) behind origin — building ${actual:0:7}"
+            warn "lucent is $behind commit(s) behind origin — building ${actual:0:7}"
             git -C "$REPO" log --oneline "$actual".."$remote" 2>/dev/null | sed 's/^/      /'
-            info "to take them:  git submodule update --remote hyprland-setup && git add hyprland-setup && git commit"
+            info "to take them:  git submodule update --remote lucent && git add lucent && git commit"
         fi
     fi
 
     if [[ -n "$(git -C "$REPO" status --porcelain 2>/dev/null)" ]]; then
-        warn "hyprland-setup has uncommitted changes — the ISO will contain them"
+        warn "lucent has uncommitted changes — the ISO will contain them"
     fi
-    ok "hyprland-setup at ${actual:0:7}$(git -C "$REPO" log -1 --format=' (%s)' 2>/dev/null)"
+    ok "lucent at ${actual:0:7}$(git -C "$REPO" log -1 --format=' (%s)' 2>/dev/null)"
 fi
 [[ -d $RELENG ]] || die "stock releng profile not found at $RELENG"
 ok "archiso $(pacman -Q archiso 2>/dev/null | awk '{print $2}')"
@@ -247,16 +247,16 @@ AIR="$PROFILE/airootfs"
 #
 # Only the desktop repo ships. starch's own build tooling has no use on the
 # installed machine, and the point of starch is that nothing of it remains.
-DEST="$AIR/usr/local/share/hyprland-setup"
+DEST="$AIR/usr/local/share/lucent"
 install -d "$DEST"
 #
-# Adding a top-level directory to hyprland-setup means adding it here too.
+# Adding a top-level directory to lucent means adding it here too.
 # wallpapers/ was missed on its first outing: install.sh copies the images out
 # of its own directory, the guard around that is a compgen test, so a missing
 # wallpapers/ failed silently and every installed machine came up with no
 # wallpaper at all.
 for item in install.sh README.md config starch-config wallpapers; do
-    [[ -e $REPO/$item ]] || die "hyprland-setup has no $item — the embedded payload would be incomplete"
+    [[ -e $REPO/$item ]] || die "lucent has no $item — the embedded payload would be incomplete"
     cp -r "$REPO/$item" "$DEST/"
 done
 
@@ -269,10 +269,10 @@ find "$DEST" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
 # swept in — exactly the failure this replaced.
 size_kb=$(du -sk "$DEST" | cut -f1)
 [[ $size_kb -lt 5120 ]] || die "embedded payload is ${size_kb}KB — something large was included"
-ok "embedded the repo at /usr/local/share/hyprland-setup (${size_kb}KB)"
+ok "embedded the repo at /usr/local/share/lucent (${size_kb}KB)"
 
 # ── boot splash ───────────────────────────────────────────────────────────────
-# The splash is starch's, not the desktop's: hyprland-setup also runs on
+# The splash is starch's, not the desktop's: lucent also runs on
 # machines starch never installed, and has no business rebuilding their boot.
 # It goes into the airootfs directly, because the *live* boot has to splash
 # too. That also means the clone inherits it: the installed system is a copy of
@@ -452,7 +452,7 @@ if compgen -G "$REPO/wallpapers/*.png" >/dev/null; then
     cp "$REPO"/wallpapers/*.png "$LIVE_HOME/Pictures/wallpapers/"
     ok "live session gets $(ls "$REPO"/wallpapers/*.png | wc -l) wallpapers"
 else
-    warn "hyprland-setup ships no wallpapers/ — the live desktop will have none"
+    warn "lucent ships no wallpapers/ — the live desktop will have none"
 fi
 rm -f "$LIVE_HOME/.config/hypr/monitors.lua" "$LIVE_HOME/.config/hypr/gpu.lua"
 
@@ -638,7 +638,7 @@ install -d "$AIR/root"
 # The theme the live desktop wears is the one a fresh install gets, read from
 # install.sh so the medium and the machine it makes cannot drift apart.
 LIVE_THEME="$(sed -n 's/^DEFAULT_THEME=//p' "$REPO/install.sh" | head -1)"
-# DEFAULT_WALLPAPER names a design in hyprland-setup's wallpapers/, not a path:
+# DEFAULT_WALLPAPER names a design in lucent's wallpapers/, not a path:
 # each design ships a 16:9 and an ultrawide render and which one fits is a
 # property of the panel, not of the repo. The medium bakes the 16:9 one, and
 # live-prepare swaps to the wide render at boot if the screen turns out to want
@@ -758,8 +758,8 @@ pd = prof / "profiledef.sh"
 s = pd.read_text()
 extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
   ["/usr/local/bin/starch-setup"]="0:0:755"
-  ["/usr/local/share/hyprland-setup/install.sh"]="0:0:755"
-  ["/usr/local/share/hyprland-setup/starch-config/starch-config"]="0:0:755"
+  ["/usr/local/share/lucent/install.sh"]="0:0:755"
+  ["/usr/local/share/lucent/starch-config/starch-config"]="0:0:755"
   ["/usr/local/lib/starch/add-microcode"]="0:0:755"
   ["/usr/local/lib/starch/live-scale"]="0:0:755"
   ["/usr/local/lib/starch/broadcom-live"]="0:0:755"
@@ -770,7 +770,7 @@ extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
   ["/usr/local/lib/starch/start-installer"]="0:0:755"
   ["/usr/local/lib/starch/add-plymouth"]="0:0:755"
   ["/usr/local/lib/starch/splash-cmdline"]="0:0:755"
-  ["/usr/local/share/hyprland-setup/config/hypr/scripts/"]="0:0:755"
+  ["/usr/local/share/lucent/config/hypr/scripts/"]="0:0:755"
   ["/home/{user}/"]="1500:1500:755"
   ["/etc/sudoers.d/00-live"]="0:0:440"
 '''

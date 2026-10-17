@@ -9,9 +9,9 @@
 set -euo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL="$HERE/hyprland-setup/install.sh"
+INSTALL="$HERE/lucent/install.sh"
 [[ -f $INSTALL ]] || {
-    echo "hyprland-setup/install.sh not found — run: git submodule update --init" >&2
+    echo "lucent/install.sh not found — run: git submodule update --init" >&2
     exit 1
 }
 

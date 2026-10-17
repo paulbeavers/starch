@@ -18,7 +18,7 @@
 # install right up until first boot.
 set -uo pipefail
 
-REPO_SRC=/usr/local/share/hyprland-setup
+REPO_SRC=/usr/local/share/lucent
 TARGET=/mnt
 
 # tty1 autologins as the unprivileged live user, but everything this script
@@ -193,9 +193,9 @@ apply_desktop() {
     # look like it came from a distro — this ends up exactly where it would be
     # if they had cloned the repo themselves, and re-running it later is the
     # same command it would have been.
-    rm -rf "$TARGET$home/hyprland-setup"
-    cp -r "$REPO_SRC" "$TARGET$home/hyprland-setup"
-    ok "at $home/hyprland-setup"
+    rm -rf "$TARGET$home/lucent"
+    cp -r "$REPO_SRC" "$TARGET$home/lucent"
+    ok "at $home/lucent"
 
     step "Running install.sh inside the new system"
     say "    This installs the desktop packages and deploys the config."
@@ -208,12 +208,12 @@ apply_desktop() {
     # pacman inside the chroot needs working DNS.
     cp /etc/resolv.conf "$TARGET/etc/resolv.conf" 2>/dev/null || true
 
-    if arch-chroot "$TARGET" "$home/hyprland-setup/install.sh" --for-user "$user"; then
+    if arch-chroot "$TARGET" "$home/lucent/install.sh" --for-user "$user"; then
         ok "desktop installed for $user"
     else
         err "install.sh failed inside the new system"
         say "    The base Arch install is intact. To retry:"
-        say "      arch-chroot $TARGET $home/hyprland-setup/install.sh --for-user $user"
+        say "      arch-chroot $TARGET $home/lucent/install.sh --for-user $user"
         return 1
     fi
     return 0

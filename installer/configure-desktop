@@ -12,7 +12,7 @@
 # Runs inside the target with Calamares' chroot.
 set -uo pipefail
 
-REPO=/usr/local/share/hyprland-setup
+REPO=/usr/local/share/lucent
 
 [[ -d $REPO ]] || { echo "  $REPO is missing; nothing to configure"; exit 0; }
 

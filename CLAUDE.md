@@ -6,18 +6,18 @@ are not visible from the code and that cost real time to learn.
 
 ## Two repos
 
-`hyprland-setup/` is a submodule: the desktop half — `install.sh`, the Hyprland
+`lucent/` is a submodule: the desktop half — `install.sh`, the Hyprland
 config, and `starch-config`. Almost all desktop changes belong there. After
 committing in the submodule, bump the pointer here:
 
-    git -C hyprland-setup fetch origin
-    git submodule update --remote hyprland-setup
-    git add hyprland-setup && git commit
+    git -C lucent fetch origin
+    git submodule update --remote lucent
+    git add lucent && git commit
 
-**The submodule is its own checkout.** Editing `~/hyprland-setup` does not
-change `starch/hyprland-setup`; the build reads the latter. Three things can
+**The submodule is its own checkout.** Editing `~/lucent` does not
+change `starch/lucent`; the build reads the latter. Three things can
 disagree — the commit recorded in starch's history, the files checked out in
-`hyprland-setup/`, and what is on origin. `git pull` updates the first and
+`lucent/`, and what is on origin. `git pull` updates the first and
 never the second. build.sh now refuses to start when those two differ and
 mentions it when origin has moved on, because a stale checkout is otherwise
 silent: the build looks perfect and ships a desktop from weeks ago.
@@ -90,7 +90,7 @@ yesterday's file. Check the name against `ls -t out/`.
 
 ## The pin is automated now, and it is branch-aware
 
-`~/hyprland-setup` has a `post-commit` hook that pushes the commit, moves the
+`~/lucent` has a `post-commit` hook that pushes the commit, moves the
 submodule here to it, commits the bump and pushes that too. It exists because
 forgetting the pin shipped two ISOs missing the fixes they were built for.
 

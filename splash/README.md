@@ -79,7 +79,7 @@ system is a copy of that image, so it arrives with it. `installer/add-plymouth`
 puts the hook in the target's initramfs and `installer/splash-cmdline` adds
 `quiet splash` to its boot entries.
 
-It used to live in hyprland-setup, and `install.sh` installed it. It moved
+It used to live in lucent, and `install.sh` installed it. It moved
 here because that script also runs on machines starch never installed — on
 Fedora it was replacing the distro's boot theme and rebuilding every
 initramfs.

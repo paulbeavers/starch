@@ -42,12 +42,12 @@ ok "git, base-devel and archiso are present"
 
 # A plain `git clone` leaves the submodule empty, and the desktop half lives
 # there. Fix it rather than complain about it.
-if [[ -f hyprland-setup/install.sh ]]; then
-    ok "hyprland-setup submodule is present"
+if [[ -f lucent/install.sh ]]; then
+    ok "lucent submodule is present"
 else
     git submodule update --init --recursive \
-        || die "could not fetch the hyprland-setup submodule"
-    ok "hyprland-setup checked out"
+        || die "could not fetch the lucent submodule"
+    ok "lucent checked out"
 fi
 
 avail=$(df -BG --output=avail . 2>/dev/null | tail -1 | tr -dc '0-9')

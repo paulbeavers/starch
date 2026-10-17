@@ -255,7 +255,7 @@ install -d "$DEST"
 # of its own directory, the guard around that is a compgen test, so a missing
 # wallpapers/ failed silently and every installed machine came up with no
 # wallpaper at all.
-for item in install.sh README.md config starch-config wallpapers; do
+for item in install.sh README.md config lucent-config wallpapers; do
     [[ -e $REPO/$item ]] || die "lucent has no $item — the embedded payload would be incomplete"
     cp -r "$REPO/$item" "$DEST/"
 done
@@ -456,7 +456,7 @@ else
 fi
 rm -f "$LIVE_HOME/.config/hypr/monitors.lua" "$LIVE_HOME/.config/hypr/gpu.lua"
 
-# starch-config opens on its welcome page at first login. On the medium the
+# lucent-config opens on its welcome page at first login. On the medium the
 # installer is the thing that should have your attention, so the switch that
 # page offers is pre-set for the live user only.
 install -d "$LIVE_HOME/.config/starch"
@@ -759,7 +759,7 @@ s = pd.read_text()
 extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
   ["/usr/local/bin/starch-setup"]="0:0:755"
   ["/usr/local/share/lucent/install.sh"]="0:0:755"
-  ["/usr/local/share/lucent/starch-config/starch-config"]="0:0:755"
+  ["/usr/local/share/lucent/lucent-config/lucent-config"]="0:0:755"
   ["/usr/local/lib/starch/add-microcode"]="0:0:755"
   ["/usr/local/lib/starch/live-scale"]="0:0:755"
   ["/usr/local/lib/starch/broadcom-live"]="0:0:755"

@@ -7,7 +7,7 @@ are not visible from the code and that cost real time to learn.
 ## Two repos
 
 `lucent/` is a submodule: the desktop half — `install.sh`, the Hyprland
-config, and `starch-config`. Almost all desktop changes belong there. After
+config, and `lucent-config`. Almost all desktop changes belong there. After
 committing in the submodule, bump the pointer here:
 
     git -C lucent fetch origin

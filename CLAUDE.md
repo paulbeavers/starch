@@ -33,6 +33,15 @@ medium: diff `work-assemble/profile` against `/usr/share/archiso/configs/releng`
 `extract-packages.sh` reads the `PKGS_*` arrays out of `install.sh`, so a
 package added there lands on the ISO too. Never maintain a second list.
 
+It reads them *by column*, with sed: only the Arch arrays, which start at
+column 0. `install.sh` also carries Fedora and Ubuntu lists, indented inside
+an `if`, and those are deliberately out of reach — the ISO is Arch, and an
+Ubuntu package name on the medium would be a build failure. So an Arch package
+has to go in at column 0 to land here, and a package added to the other two
+lists will not. After touching any of them, check the list did not move:
+
+    diff <(./extract-packages.sh) <previous output>
+
 **Do not edit `build.sh` while a build is running.** Bash reads a script
 incrementally; an edit mid-run makes it resume at a byte offset into different
 text and die with a syntax error a hundred lines from anything you touched. If

@@ -47,9 +47,22 @@ localrepo/            built packages (gitignored; make it with build-aur.sh)
 ```
 
 Splitting them keeps the desktop usable on its own — clone that repo and run
-`install.sh` on an existing Arch system, no ISO involved — and pins exactly
-which version of the config an ISO carries, since the submodule records a
-commit rather than tracking a branch.
+`install.sh` on an existing system, no ISO involved — and pins exactly which
+version of the config an ISO carries, since the submodule records a commit
+rather than tracking a branch.
+
+Used that way it is not Arch-only. `install.sh` also installs onto Fedora 41
+or newer, including aarch64 and Fedora Asahi Remix on Apple silicon, and onto
+Ubuntu 26.04 LTS or newer and the distributions built on it (Mint, Pop!_OS,
+Zorin, elementary). It works out which of the three it is from
+`/etc/os-release` and swaps the package names, the package manager and where
+Hyprland comes from; everything it deploys is the same on all of them.
+
+**This ISO is still Arch**, and that is the only thing it will ever install:
+the package list `extract-packages.sh` derives from `install.sh` is the Arch
+one, by column — the Fedora and Ubuntu lists are deliberately indented out of
+its reach. The other two distributions matter only when the desktop repo is
+used directly. Its README covers what differs on each.
 
 Clone with the submodule:
 

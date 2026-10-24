@@ -61,3 +61,17 @@ Two things that cost an afternoon:
   Hyprland's own keybinds still fire — so it looks like the toolkit is broken
   rather than the injection. Sending both also makes waybar count two ticks,
   so expect a scroll to move two workspaces.
+
+## `install-manifest` — is this install native?
+
+```
+sudo ./tools/install-manifest > starch.txt     # on a starch install
+sudo ./tools/install-manifest > native.txt     # on a hand install, same hardware
+diff native.txt starch.txt
+```
+
+Packages and their install reasons, enabled units, modified and unowned files
+under `/etc`, fstab, initramfs hooks, boot entries and users, with UUIDs and
+names stripped so two installs compare clean. starch's design principle is
+that the two are the same; everything left in the diff should be on the list
+of deliberate differences in `CLAUDE.md`.

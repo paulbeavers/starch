@@ -18,7 +18,6 @@ set -euo pipefail
 
 # Package, and why it is here.
 AUR_PACKAGES=(
-    calamares             # the installer; Qt6 and kpmcore come from extra
     broadcom-bt-firmware  # BCM20702 bluetooth, in the same MacBooks
 )
 
@@ -46,8 +45,7 @@ mkdir -p "$WORK" "$REPO"
 for pkg in "${AUR_PACKAGES[@]}"; do
     step "$pkg"
 
-    # Already built and not being forced? Leave it. Rebuilding Calamares takes
-    # twenty minutes and nothing about it has changed.
+    # Already built and not being forced? Leave it.
     if [[ $FORCE -eq 0 ]] && compgen -G "$REPO/$pkg-*.pkg.tar.*" >/dev/null; then
         ok "already in the repo: $(basename "$(compgen -G "$REPO/$pkg-*.pkg.tar.*" | head -1)")"
         continue
@@ -77,6 +75,15 @@ done
 
 step "Indexing $REPO"
 rm -f "$REPO"/*-debug-*.pkg.tar.*
+# Anything no longer on the list goes. The medium copies this directory whole,
+# so a package dropped from AUR_PACKAGES would otherwise ride along forever —
+# Calamares, 60MB, after the installer stopped using it.
+for built in "$REPO"/*.pkg.tar.*; do
+    name="$(pacman -Qqp "$built" 2>/dev/null)" || continue
+    [[ " ${AUR_PACKAGES[*]} " == *" $name "* ]] && continue
+    rm -f "$built"
+    ok "removed $name, which is no longer on the list"
+done
 rm -f "$REPO/$DB.db"* "$REPO/$DB.files"*
 repo-add --quiet "$REPO/$DB.db.tar.zst" "$REPO"/*.pkg.tar.*
 ok "$(ls -1 "$REPO"/*.pkg.tar.* | wc -l) package(s)"

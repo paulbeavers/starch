@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Print what makes an installed Arch system what it is, as sorted text.
+#
+#     tools/install-manifest > starch.txt          on a starch install
+#     tools/install-manifest > native.txt          on a hand install
+#     diff native.txt starch.txt
+#
+# starch's design principle is that its install is the system you would get by
+# installing Arch by hand and then running lucent's install.sh. This is the
+# check: everything in that diff should be one of the deliberate differences
+# listed in starch's CLAUDE.md, and anything else is drift.
+#
+# Machine-specific values are left out — hostname, UUIDs, the machine id,
+# usernames — so two installs on the same hardware compare clean. Compare like
+# with like: install.sh installs drivers for the GPU it finds, so a VM and a
+# MacBook differ for reasons that are correct.
+#
+# Needs root to read every file under /etc; without it the unreadable ones are
+# listed as such rather than silently skipped.
+set -uo pipefail
+
+section() { printf '\n## %s\n' "$1"; }
+
+section "explicitly installed packages"
+pacman -Qqe | sort
+
+section "installed as dependencies"
+pacman -Qqd | sort
+
+section "foreign packages (not in any sync database)"
+pacman -Qqm | sort
+
+section "enabled units"
+systemctl list-unit-files --state=enabled --no-legend --no-pager 2>/dev/null |
+    awk '{print $1}' | grep -v '@[^.]\+\.' | sort
+section "enabled user units (global)"
+systemctl --global list-unit-files --state=enabled --no-legend --no-pager 2>/dev/null |
+    awk '{print $1}' | sort
+
+section "default target"
+systemctl get-default
+
+# Package-owned files under /etc that differ from what the package shipped.
+# pacman -Qkk reports them per file; only the path matters here.
+section "modified package files under /etc"
+pacman -Qkk 2>/dev/null |
+    sed -nE 's/^(warning: |backup file: )?[^:]+: (\/etc\/[^ ]+) \((Modification time|Size|SHA256 checksum|MD5 checksum) mismatch\).*/\2/p' |
+    sort -u
+
+# Files under /etc no package owns: everything an installer or a script wrote.
+# Machine identity and generated state are excluded by name.
+section "unowned files under /etc"
+find /etc -xdev \( -type f -o -type l \) 2>/dev/null | sort > /tmp/.manifest-etc.$$
+pacman -Qlq 2>/dev/null | grep '^/etc/' | sed 's|/$||' | sort -u > /tmp/.manifest-owned.$$
+comm -23 /tmp/.manifest-etc.$$ /tmp/.manifest-owned.$$ |
+    grep -vE '^/etc/(machine-id|hostname|localtime|adjtime|\.pwd\.lock|\.updated|ld\.so\.cache|pacman\.d/gnupg/|ssl/certs/|ca-certificates/extracted/|systemd/system/.*\.wants/|systemd/user/.*\.wants/|NetworkManager/system-connections/|(passwd|group|shadow|gshadow|subuid|subgid)-?$)'
+rm -f /tmp/.manifest-etc.$$ /tmp/.manifest-owned.$$
+
+section "fstab (devices replaced by their type)"
+grep -vE '^\s*(#|$)' /etc/fstab | awk '{ $1 = "<dev>"; print }' | sort
+
+section "mkinitcpio HOOKS"
+grep -E '^HOOKS=' /etc/mkinitcpio.conf
+
+section "boot entries (options with UUIDs removed)"
+for f in /boot/loader/entries/*.conf /efi/loader/entries/*.conf; do
+    [[ -f $f ]] || continue
+    printf '%s\n' "${f##*/}"
+    sed -E 's/UUID=[0-9a-fA-F-]+/UUID=<uuid>/g; s/rd\.luks\.name=[0-9a-fA-F-]+/rd.luks.name=<uuid>/; s/^/    /' "$f"
+done
+
+section "users with a login shell (uid >= 1000, names removed)"
+awk -F: '$3 >= 1000 && $3 < 65534 { print "uid " $3 ": shell " $7 }' /etc/passwd
+for u in $(awk -F: '$3 >= 1000 && $3 < 65534 { print $1 }' /etc/passwd); do
+    printf 'groups: %s\n' "$(id -nG "$u" | tr ' ' '\n' | grep -vx "$u" | sort | tr '\n' ' ')"
+done

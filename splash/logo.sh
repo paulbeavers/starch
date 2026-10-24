@@ -11,7 +11,7 @@
 # than a compromise.
 #
 # Anything that is *not* Plymouth wants it bigger, and scales it down itself:
-# hence HEIGHT. Calamares' branding uses this.
+# hence HEIGHT.
 set -euo pipefail
 
 HEIGHT="${HEIGHT:-440}"

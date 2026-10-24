@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 # Build the starch install ISO.
 #
-# starch is install media and nothing else. It boots to an installer, lays down
-# Arch plus this Hyprland setup, and then has no further existence — the
-# installed system is plain Arch, updated with pacman, with no custom repo or
-# branding left behind.
+# starch is install media and nothing else. It boots to a text installer that
+# runs pacstrap and then lucent's install.sh, exactly as someone installing Arch
+# by hand would, and then has no further existence — the installed system is
+# plain Arch, updated with pacman, with no custom repo left behind.
+#
+# Offline: the medium carries every package the install can ask for, as pacman
+# repositories under /usr/share/starch. See "the offline repository" below.
 #
 #     ./build.sh              build (needs root for mkarchiso)
 #     ./build.sh --check      verify prerequisites and print the plan, build nothing
 #     ./build.sh --assemble    assemble the profile but do not run mkarchiso.
 #                              Needs no root, so the overlay can be inspected
 #                              and diffed before committing to a 20GB build.
+#                              Skips the offline repository, which needs root
+#                              to download.
 #     ./build.sh --clean      remove the work directory and exit
 #     ./build.sh --reuse      keep the existing work directory. Faster, but
 #                             mkarchiso skips steps it has already done, so the
@@ -37,8 +42,6 @@ OUT="${OUT:-$HERE/out}"
 LOCALREPO="${LOCALREPO:-$HERE/localrepo}"
 LOCALDB=starch-local
 
-# Live session identity.
-LIVE_USER="${LIVE_USER:-live}"
 ISO_NAME="starch"
 ISO_LABEL="STARCH_$(date +%Y%m)"
 ISO_PUBLISHER="starch <https://github.com/paulbeavers/lucent>"
@@ -48,6 +51,7 @@ C_B=$'\e[34m'; C_G=$'\e[32m'; C_Y=$'\e[33m'; C_R=$'\e[31m'; C_0=$'\e[0m'
 step() { printf '\n%s==>%s %s\n' "$C_B" "$C_0" "$1"; }
 ok()   { printf '    %s✓%s %s\n' "$C_G" "$C_0" "$1"; }
 warn() { printf '    %s!%s %s\n' "$C_Y" "$C_0" "$1"; }
+info() { printf '      %s\n' "$1"; }
 die()  { printf '\n%sERROR:%s %s\n' "$C_R" "$C_0" "$1" >&2; exit 1; }
 
 CHECK_ONLY=0
@@ -141,7 +145,7 @@ if [[ $CHECK_ONLY -eq 1 ]]; then
     echo "    base profile : $RELENG"
     echo "    work dir     : $WORK"
     echo "    output       : $OUT/${ISO_NAME}-*.iso"
-    echo "    live user    : $LIVE_USER (autologin, straight into the installer)"
+    echo "    tty1         : root autologin, straight into the installer"
     echo "    label        : $ISO_LABEL"
     printf '\n    Build with:  sudo %s\n\n' "$0"
     exit 0
@@ -161,60 +165,57 @@ rm -rf "$PROFILE"; mkdir -p "$PROFILE" "$OUT"
 cp -r "$RELENG/." "$PROFILE/"
 ok "copied stock releng profile"
 
-# Calamares installs by copying the live filesystem onto the target, so the ISO
-# has to contain the finished system: the desktop packages ship here, not on
-# the other side of a download. That is what makes the install fast and lets it
-# work with no network at all.
-#
-# The desktop list comes from install.sh via extract-packages.sh, so the two
-# cannot drift — adding a package to install.sh puts it on the ISO too.
-desktop_pkgs="$("$HERE/extract-packages.sh")" \
-    || die "could not read the desktop package list from install.sh"
-printf '%s\n' "$desktop_pkgs" >> "$PROFILE/packages.x86_64"
-desktop_n=$(printf '%s\n' "$desktop_pkgs" | wc -l)
 
-# Installer tooling, and the graphical canvas Calamares is drawn on. cage is a
-# kiosk compositor: one application, full screen, no desktop around it.
+# ── what the medium itself runs ───────────────────────────────────────────────
+# The live system is releng plus the installer's tools. The desktop does not
+# run here and its packages are not installed here; they travel as package
+# files in the offline repository and are installed onto the target by
+# pacstrap and install.sh, the way they would be from a mirror.
+#
+#   gum                    draws the installer's questions
+#   arch-install-scripts   pacstrap, genfstab, arch-chroot
+#   cryptsetup, btrfs-progs, gptfdisk, dosfstools, e2fsprogs
+#                          the disk work
+#   plymouth               the live boot's splash, and the theme the installer
+#                          copies onto the target
+#   terminus-font          a console font a retina panel can be read at
+#   networkmanager         so the live console can join a network with nmtui
+#                          when someone wants one; the install never needs it
+#   broadcom-wl-dkms, dkms, linux-headers
+#                          the wl driver for the live session, which
+#                          broadcom-live picks at boot. Without it a 2013
+#                          retina MacBook Pro has no wireless on the medium.
 printf '%s\n' \
-    calamares \
-    cage qt6-wayland \
+    gum \
+    arch-install-scripts \
+    cryptsetup btrfs-progs gptfdisk dosfstools e2fsprogs parted \
+    plymouth terminus-font \
     networkmanager \
-    archinstall arch-install-scripts dialog \
-    parted gptfdisk dosfstools e2fsprogs btrfs-progs exfatprogs ntfs-3g \
-    git jq \
+    broadcom-wl-dkms dkms linux-headers \
     >> "$PROFILE/packages.x86_64"
 LC_ALL=C sort -u -o "$PROFILE/packages.x86_64" "$PROFILE/packages.x86_64"
-ok "package list ($(wc -l < "$PROFILE/packages.x86_64") total, ${desktop_n} from install.sh)"
+ok "live package list ($(wc -l < "$PROFILE/packages.x86_64") packages)"
 
-# ── the local repo that carries Calamares ─────────────────────────────────────
-# A few packages are not in the official repositories — the installer itself,
-# and firmware for Broadcom wireless. tools/build-aur.sh builds them into
-# localrepo/ and the profile installs them from there.
+# ── the local repo, for what the AUR has and Arch does not ────────────────────
+# One package: the Broadcom bluetooth firmware for Intel MacBooks.
+# tools/build-aur.sh builds it into localrepo/. The medium does not install it;
+# it rides along as a repository the installer offers to pacstrap on Apple
+# hardware.
+#
 # Check for each one by name. "the directory is not empty" was enough when
 # there was a single package in it; with more than one, a half-built repo would
-# otherwise get past this and fail much later, inside pacstrap, as an
-# unresolvable target.
+# otherwise get past this and fail much later as an unresolvable target.
 aur_missing=()
 for _p in $(sed -n '/^AUR_PACKAGES=(/,/^)/p' "$HERE/tools/build-aur.sh" \
             | sed '1d;$d' | awk '{print $1}'); do
     compgen -G "$LOCALREPO/$_p-*.pkg.tar.*" >/dev/null || aur_missing+=("$_p")
 done
-
-if [[ -d $LOCALREPO && ${#aur_missing[@]} -eq 0 ]]; then
-    cat >> "$PROFILE/pacman.conf" <<EOF
-
-[$LOCALDB]
-SigLevel = Optional TrustAll
-Server = file://$LOCALREPO
-EOF
-    ok "local repo wired in ($(ls -1 "$LOCALREPO"/*.pkg.tar.* 2>/dev/null | wc -l) package(s))"
-
-elif [[ $ASSEMBLE_ONLY -eq 1 ]]; then
-    # Assembling is for inspecting the profile; not having built Calamares yet
-    # is worth saying, but it is not a reason to refuse to lay the profile out.
-    warn "not built: ${aur_missing[*]} — run ./tools/build-aur.sh before the real build"
-else
-    die "not built: ${aur_missing[*]:-<none>}. Run:  ./tools/build-aur.sh"
+if [[ ${#aur_missing[@]} -gt 0 ]]; then
+    if [[ $ASSEMBLE_ONLY -eq 1 ]]; then
+        warn "not built: ${aur_missing[*]} — run ./tools/build-aur.sh before the real build"
+    else
+        die "not built: ${aur_missing[*]}. Run:  ./tools/build-aur.sh"
+    fi
 fi
 
 # ── branding ──────────────────────────────────────────────────────────────────
@@ -239,7 +240,7 @@ sed -i -E 's|^timeout[[:space:]]+[0-9]+|timeout 3|' "$PROFILE/efiboot/loader/loa
 sed -i -E 's|^TIMEOUT[[:space:]]+[0-9]+|TIMEOUT 30|' "$PROFILE"/syslinux/archiso_head.cfg
 ok "boot menu says starch, and waits 3 seconds instead of 15"
 
-# ── the repo itself, so the live session can install from it ──────────────────
+# ── the desktop setup, which the installer runs in the target ─────────────────
 AIR="$PROFILE/airootfs"
 # An allowlist, not an exclude list. An earlier version excluded build output by
 # name and the pattern silently did not match, so a 2.5GB ISO from the previous
@@ -274,9 +275,8 @@ ok "embedded the repo at /usr/local/share/lucent (${size_kb}KB)"
 # ── boot splash ───────────────────────────────────────────────────────────────
 # The splash is starch's, not the desktop's: lucent also runs on
 # machines starch never installed, and has no business rebuilding their boot.
-# It goes into the airootfs directly, because the *live* boot has to splash
-# too. That also means the clone inherits it: the installed system is a copy of
-# this filesystem, so the theme and the choice of theme come across as they are.
+# It goes into the airootfs for the live boot, and the installer copies the
+# theme from here onto the target, so both boots wear the same one.
 PLY="$AIR/usr/share/plymouth/themes/starch"
 install -d "$PLY"
 cp "$HERE/splash/theme/"* "$PLY/"
@@ -346,8 +346,8 @@ ok "boot splash: theme, initramfs hook and $splash_n boot entries"
 #   time-wait-sync      blocks until the clock is synchronised with NTP, which
 #                       needs the network that is not there.
 #
-# Networking still comes up; nothing waits for it. The install is a copy of
-# this filesystem and never needed it.
+# Networking still comes up; nothing waits for it. The install reads its
+# packages from the medium and never needs it.
 for unit in \
     cloud-init.target.wants/cloud-config.service \
     cloud-init.target.wants/cloud-final.service \
@@ -374,242 +374,31 @@ ExecStart=-/usr/bin/plymouth quit --retain-splash
 DROPIN
 ok "the splash stays up until something draws over it"
 
-# ── live user with the desktop config already in place ────────────────────────
-# The live user is declared to systemd-sysusers rather than written straight
-# into /etc/{passwd,group,shadow}.
+# ── tty1 is the installer ─────────────────────────────────────────────────────
+# releng already logs root in on tty1 and runs ~/.zlogin, so the installer is
+# one line there. Not exec: quitting the installer leaves a root shell on the
+# same console, which is where someone who quit wants to be. The other VTs
+# are root shells as they are on any Arch medium.
 #
-# Those three are backup files of the "filesystem" package. The profile's
-# airootfs is copied into place *before* pacstrap runs, so anything written
-# here is what the package hooks find when they run. Releng ships a one-line
-# passwd (it only changes root's shell) and no group file at all. Writing a
-# group file containing just the live user replaced the real group database
-# while /etc/gshadow stayed as the package shipped it, and the two then
-# disagreed: the pacstrap sysusers hook died on "/etc/gshadow: Group root
-# already exists" and stopped before creating any system user.
-#
-# The cost of that was not obvious. With no "systemd-network" user,
-# systemd-networkd fails at 217/USER and never brings up a link, so the live
-# ISO has no network — and archinstall answers a failed connectivity check by
-# opening its wifi prompt, finding no wifi device, and returning 0 without
-# installing anything. A silent, successful-looking install of nothing.
-#
-# A sysusers drop-in cooperates with the package files instead of replacing
-# them. zz- so it sorts last: wheel has to exist (basic.conf, GID 998) before
-# anyone can be added to it.
-install -d "$AIR/etc/sysusers.d"
-# 1500, not 1000. The live user exists only on the medium, but it takes a UID
-# there, and the account the installer creates gets the next one free — the
-# first Calamares install made its user 1001, which is not what someone setting
-# up their own machine expects to see. Out of the way, and 1000 is left for
-# them.
-cat > "$AIR/etc/sysusers.d/zz-live.conf" <<EOF
-g ${LIVE_USER} 1500
-u ${LIVE_USER} 1500:${LIVE_USER} "starch live user" /home/${LIVE_USER} /bin/bash
-m ${LIVE_USER} wheel
-EOF
-# sysusers locks the account, which autologin does not care about: agetty
-# --autologin does not authenticate. Everything that needs privilege goes
-# through sudo, which is passwordless here for the same reason.
-install -d -m 750 "$AIR/etc/sudoers.d"
-echo "${LIVE_USER} ALL=(ALL) NOPASSWD: ALL" > "$AIR/etc/sudoers.d/00-live"
-chmod 440 "$AIR/etc/sudoers.d/00-live"
-ok "live user '${LIVE_USER}' declared to sysusers (passwordless sudo)"
+# STARCH_SHELL guards against re-entry from a nested login shell.
+cat >> "$AIR/root/.zlogin" <<'ZLOGIN'
 
-# The overlay must not carry a user or group database of its own. Replacing one
-# of these disables every system user on the ISO and says nothing about it, so
-# fail the build here rather than ship it.
-for f in passwd group shadow gshadow; do
-    [[ -e "$AIR/etc/$f" ]] || continue
-    cmp -s "$AIR/etc/$f" "$RELENG/airootfs/etc/$f" && continue
-    die "the profile ships its own /etc/$f — that breaks the pacstrap sysusers hook"
-done
-ok "user and group databases left to the packages"
-
-# ── the live session is the finished desktop ──────────────────────────────────
-# The medium boots into the same desktop it installs, with the installer
-# opening on top of it — the way Ubuntu and most others do it. Two reasons
-# beyond looking better than a full-screen installer on a 5K monitor: you can
-# see what you are about to install before committing a disk to it, and the
-# installer becomes a window on a compositor that honours geometry, which is
-# the thing cage could never do.
-#
-# The config is copied rather than installed. install.sh --for-user would also
-# detect monitors and a GPU, and it would be detecting this build machine's,
-# which is exactly wrong for a medium that boots on someone else's hardware.
-# monitors.lua and gpu.lua are deliberately absent: hyprland.lua treats both as
-# optional and Hyprland's own detection is right when there is nothing to say.
-LIVE_HOME="$AIR/home/$LIVE_USER"
-install -d "$LIVE_HOME/.config"
-cp -r "$REPO/config/." "$LIVE_HOME/.config/"
-find "$LIVE_HOME/.config" -name '*.sh' -exec chmod 755 {} +
-
-# The wallpapers live outside config/ because they are not configuration and do
-# not belong in ~/.config. install.sh puts them here on a real machine; the
-# medium needs the same, both so the live desktop has one and so SUPER+W has
-# something to offer.
-install -d "$LIVE_HOME/Pictures/wallpapers"
-if compgen -G "$REPO/wallpapers/*.png" >/dev/null; then
-    cp "$REPO"/wallpapers/*.png "$LIVE_HOME/Pictures/wallpapers/"
-    ok "live session gets $(ls "$REPO"/wallpapers/*.png | wc -l) wallpapers"
-else
-    warn "lucent ships no wallpapers/ — the live desktop will have none"
+# starch: tty1 opens the installer. Quitting it leaves this shell.
+if [[ $(tty) == /dev/tty1 && -z ${STARCH_SHELL:-} ]]; then
+    export STARCH_SHELL=1
+    starch-install
+    print "\n  starch-install  runs the installer again.\n"
 fi
-rm -f "$LIVE_HOME/.config/hypr/monitors.lua" "$LIVE_HOME/.config/hypr/gpu.lua"
+ZLOGIN
+ok "tty1 opens the installer, a shell behind it"
 
-# lucent-config opens on its welcome page at first login. On the medium the
-# installer is the thing that should have your attention, so the switch that
-# page offers is pre-set for the live user only.
-install -d "$LIVE_HOME/.config/starch"
-cat > "$LIVE_HOME/.config/starch/settings.json" <<'STATE'
-{
-  "show_at_login": false
-}
-STATE
-
-# hyprland.lua ends with optional("live"), which exists for exactly this: a
-# module that is only ever present on install media. It is what makes the
-# session an installer session rather than a desktop that happens to be
-# running from a stick.
-cat > "$LIVE_HOME/.config/hypr/live.lua" <<'LIVE'
---------------------------------------------------------------------------------
---  Install media only
---
---  Loaded last by hyprland.lua, and present only here — an installed system
---  has no such file. Everything in it is about the medium.
---------------------------------------------------------------------------------
-
--- The installer is a window, not the screen. live-prepare sizes it from the
--- monitor it finds, since half of a 5K panel and half of a 1280x800 one want
--- different answers, and writes live-window.lua just before Hyprland starts.
---
--- pcall rather than hyprland.lua's optional(), which is a local in that file
--- and not visible from a module it requires. Missing means live-prepare did
--- not run: the installer still opens, tiled, which is what it did before any
--- of this.
-pcall(require, "live-window")
-
-hl.on("hyprland.start", function()
-    -- The installer, elevated. Calamares partitions disks; nothing else here
-    -- is root. The variables are named rather than passed with sudo -E, which
-    -- depends on the sudoers policy and can drop one without saying so.
-    hl.exec_cmd("/usr/local/lib/starch/start-installer")
-
-    -- No second wallpaper pass here, and no longer any reason for one.
-    -- autostart.lua's --restore runs swaybg with the image as an argument, so
-    -- there is no daemon to be waiting for. The pass that used to be here was
-    -- added when the medium came up bare, and made it worse: it ran while the
-    -- first --restore was still waiting on hyprpaper and the two killed each
-    -- other's daemon in turn.
-end)
-
--- The medium launches the Hyprland binary from .bash_profile rather than
--- through start-hyprland, for the reason recorded there, so it would
--- otherwise warn about it on every boot. An installed system never gets here:
--- the stock hyprland.desktop is Exec=/usr/bin/start-hyprland and the uwsm
--- entry resolves through that same file.
-hl.config({ misc = { disable_watchdog_warning = true } })
-LIVE
-
-ok "live session gets the desktop config, with the installer on top"
-
-# ── autologin straight into the desktop ───────────────────────────────────────
-install -d "$AIR/etc/systemd/system/getty@tty1.service.d"
-cat > "$AIR/etc/systemd/system/getty@tty1.service.d/autologin.conf" <<EOF
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin ${LIVE_USER} --noclear %I \$TERM
-EOF
-
-cat > "$AIR/home/${LIVE_USER}/.bash_profile" <<'EOF'
-# Install media: tty1 brings up the desktop, with the installer on top of it.
-# Any other VT is a plain shell, which matters when the desktop is the thing
-# that is broken.
-#
-# Hyprland directly, not uwsm and not a display manager. Nothing here waits on
-# graphical.target, and nothing waits on the network — an earlier attempt at a
-# live desktop put a ninety second countdown on the screen and the cause was
-# cloud-init and networkd-wait-online pulling in network-online.target, not the
-# compositor. Those are off on this medium.
-#
-# Not start-hyprland, the watchdog wrapper, although launching the binary
-# directly is what makes Hyprland print "started without start-hyprland".
-# That warning is cosmetic; the wrapper was not. On a 2013 13" MacBook Pro it
-# exited immediately, the line below fell straight through to the text
-# installer, and the machine came up with no desktop at all — while the same
-# medium was fine on a 15" and in a VM. A cosmetic warning is not worth a
-# failure mode that depends on the hardware in front of it. live.lua silences
-# the warning with misc:disable_watchdog_warning instead.
-#
-# If the session cannot start, the text installer still can. That is the whole
-# reason the fallback is here: a graphical failure should cost you the pretty
-# installer, not the ability to install.
-#
-# STARCH_SHELL guards against re-entry. The text menu's Shell option runs a
-# login shell, which reads this file — without the guard it execs straight back
-# into the installer and the menu appears to ignore the choice.
-if [[ $XDG_VTNR == 1 && -z ${STARCH_SHELL:-} ]]; then
-    # Decide the display scale and the installer's window size from the panel
-    # in front of us, and write both where hyprland.lua will read them.
-    /usr/local/lib/starch/live-prepare
-
-    Hyprland 2>>/tmp/hyprland-session.log
-
-    # Hyprland exited: either the installer finished and quit the session, or
-    # it never started. Either way the text menu is what is left.
-    #
-    # Say which, on the screen. A 13" MacBook Pro that dropped to the text
-    # installer because the compositor would not start gave no hint that
-    # anything had gone wrong, and looked simply like a medium that had no
-    # desktop on it.
-    printf '\n  The desktop did not start; falling back to the text installer.\n'
-    printf '  See /tmp/hyprland-session.log for why.\n\n'
-    exec starch-install
-fi
-EOF
-ok "tty1 opens the desktop with the installer on it, text menu behind"
-
-# ── Calamares ─────────────────────────────────────────────────────────────────
-install -d "$AIR/etc/calamares/modules" "$AIR/etc/calamares/branding/starch"
-install -m 644 "$HERE/calamares/settings.conf" "$AIR/etc/calamares/settings.conf"
-install -m 644 "$HERE/calamares/modules/"*.conf "$AIR/etc/calamares/modules/"
-install -m 644 "$HERE/calamares/branding/starch/"* "$AIR/etc/calamares/branding/starch/"
-ok "Calamares configuration ($(ls -1 "$HERE/calamares/modules" | wc -l) modules)"
-
-# The two scripts Calamares runs inside the target. They live outside
-# /usr/local/bin because they are not commands anyone should run by hand.
+# ── live wireless ─────────────────────────────────────────────────────────────
+# The install needs no network, but the live console is still a working Arch
+# medium, and a MacBook whose card wants wl has no wireless on it unless the
+# driver is chosen before the network comes up. broadcom-live does that from
+# the same list install.sh uses for the installed system.
 install -d "$AIR/usr/local/lib/starch"
-install -m 755 "$HERE/installer/add-microcode"     "$AIR/usr/local/lib/starch/add-microcode"
-install -m 755 "$HERE/installer/live-scale"        "$AIR/usr/local/lib/starch/live-scale"
-install -m 755 "$HERE/installer/broadcom-live"     "$AIR/usr/local/lib/starch/broadcom-live"
-install -m 755 "$HERE/installer/copy-kernel"       "$AIR/usr/local/lib/starch/copy-kernel"
-install -m 755 "$HERE/installer/strip-live"        "$AIR/usr/local/lib/starch/strip-live"
-install -m 755 "$HERE/installer/configure-desktop" "$AIR/usr/local/lib/starch/configure-desktop"
-install -m 755 "$HERE/installer/live-prepare"      "$AIR/usr/local/lib/starch/live-prepare"
-install -m 755 "$HERE/installer/start-installer"   "$AIR/usr/local/lib/starch/start-installer"
-install -m 755 "$HERE/installer/add-plymouth"      "$AIR/usr/local/lib/starch/add-plymouth"
-install -m 755 "$HERE/installer/splash-cmdline"    "$AIR/usr/local/lib/starch/splash-cmdline"
-install -m 755 "$HERE/installer/boot-entries"      "$AIR/usr/local/lib/starch/boot-entries"
-ok "post-install scripts staged"
-
-# A rescue shell that works. Calamares creates root with a locked password, so
-# emergency mode answered every failed boot with "the root account is locked"
-# and nothing else: a machine that broke after a kernel upgrade could not be
-# looked at without a USB stick. SYSTEMD_SULOGIN_FORCE makes sulogin open the
-# shell regardless. Anyone at the keyboard could already get one through the
-# systemd-boot editor with init=/bin/bash, so this gives nothing away. Lives
-# in the airootfs, so the installed system inherits it with the clone.
-for unit in emergency rescue; do
-    install -d "$AIR/etc/systemd/system/$unit.service.d"
-    cat > "$AIR/etc/systemd/system/$unit.service.d/sulogin-force.conf" <<'EOF'
-[Service]
-Environment=SYSTEMD_SULOGIN_FORCE=1
-EOF
-done
-ok "emergency and rescue mode open a shell with root locked"
-
-# Wireless in the live session. The installed system gets its driver choice
-# from install.sh; the medium has to work it out at boot, on hardware it has
-# not seen before, before anything tries to bring a network up.
+install -m 755 "$HERE/installer/broadcom-live" "$AIR/usr/local/lib/starch/broadcom-live"
 install -d "$AIR/etc/systemd/system/multi-user.target.wants"
 cat > "$AIR/etc/systemd/system/starch-broadcom.service" <<'EOF'
 [Unit]
@@ -639,8 +428,7 @@ ok "live session picks its own wireless driver"
 # which is true whenever /usr is newer than the .updated stamp in /etc. A fresh
 # airootfs has no such stamp, so the condition holds on every boot of every
 # copy of the medium — and ldconfig walking every library through a compressed
-# squashfs takes upwards of forty seconds. It is most of the wait between the
-# splash and the installer, and it shows up on the details screen as
+# squashfs takes upwards of forty seconds, shown on the details screen as
 #
 #   [ * ] A start job is running for Rebuild Dynamic Linker Cache (40s / no limit)
 #
@@ -652,69 +440,22 @@ ok "live session picks its own wireless driver"
 # everything else has finished touching /etc. mkarchiso warns that it is
 # deprecated and deletes it after running, so nothing of it reaches the image.
 install -d "$AIR/root"
-# The theme the live desktop wears is the one a fresh install gets, read from
-# install.sh so the medium and the machine it makes cannot drift apart.
-LIVE_THEME="$(sed -n 's/^DEFAULT_THEME=//p' "$REPO/install.sh" | head -1)"
-# DEFAULT_WALLPAPER names a design in lucent's wallpapers/, not a path:
-# each design ships a 16:9 and an ultrawide render and which one fits is a
-# property of the panel, not of the repo. The medium bakes the 16:9 one, and
-# live-prepare swaps to the wide render at boot if the screen turns out to want
-# it. Read as a path, this used to be /usr/share/hypr/wall2.png.
-LIVE_WALL_DESIGN="$(sed -n 's/^DEFAULT_WALLPAPER=//p' "$REPO/install.sh" | head -1)"
-LIVE_WALL="/home/${LIVE_USER}/Pictures/wallpapers/${LIVE_WALL_DESIGN}-3840x2160.png"
-[[ -n $LIVE_THEME ]] || die "could not read DEFAULT_THEME from install.sh"
-
-cat > "$AIR/root/customize_airootfs.sh" <<CUSTOMIZE
+cat > "$AIR/root/customize_airootfs.sh" <<'CUSTOMIZE'
 #!/usr/bin/env bash
 # Run by mkarchiso inside the airootfs, then deleted. See build.sh.
-
-# The live desktop's palette. theme.sh renders the active theme into the six
-# formats the desktop reads — waybar imports a colors.css that does not exist
-# until this runs, and an unstyled bar is the first thing anyone would see.
-# --no-reload because there is nothing running in a chroot to signal.
-if [ -x /home/${LIVE_USER}/.config/hypr/scripts/theme.sh ]; then
-    HOME=/home/${LIVE_USER} XDG_CONFIG_HOME=/home/${LIVE_USER}/.config \
-        /home/${LIVE_USER}/.config/hypr/scripts/theme.sh --set ${LIVE_THEME} --no-reload \
-        || echo "  theme.sh failed; the live bar will be unstyled"
-fi
-
-# And its wallpaper, by the same argument: the recorded choice and the lock
-# screen are both written from it. --no-reload, so nothing tries to draw
-# anything in a chroot; the live session's autostart runs swaybg at boot.
-if [ -x /home/${LIVE_USER}/.config/hypr/scripts/wallpaper.sh ] && [ -f "${LIVE_WALL}" ]; then
-    HOME=/home/${LIVE_USER} XDG_CONFIG_HOME=/home/${LIVE_USER}/.config \
-        /home/${LIVE_USER}/.config/hypr/scripts/wallpaper.sh --set "${LIVE_WALL}" --no-reload \
-        || echo "  wallpaper.sh failed; the live desktop will have no wallpaper"
-fi
 #
-# Deliberately cannot fail the build. Neither of these is worth losing a
-# twenty-minute build over: the worst case without them is the boot taking the
-# time back, which is where it was already.
+# Deliberately cannot fail the build. The worst case without any of this is a
+# slower boot or a console that has to start NetworkManager by hand.
 set -u
 
-# theme.sh and wallpaper.sh just ran as root with HOME pointed at the live
-# user, and whatever they cached landed in /home/${LIVE_USER} owned by root.
-# archiso applies profiledef's file_permissions *before* this script runs, so
-# nothing puts it back: /home/${LIVE_USER}/.cache shipped as root:root 700, and
-# every app that wants a cache directory died on startup. kitty was the visible
-# one — SUPER+Return did nothing and the medium had no way to reach a shell.
-#
-# Numeric ids, to match profiledef and because name lookup in a chroot is one
-# more thing that can quietly not work.
-chown -R 1500:1500 /home/${LIVE_USER}
-
-# ── networking, matched to what an installed system gets ─────────────────────
-# archiso ships iwd + systemd-networkd. Everything on this desktop that shows
-# or controls a network is NetworkManager's — waybar's network module, the
-# nm-applet tray icon, nmtui — so the medium had a wireless stack that nothing
-# on screen could drive. strip-live already flips the installed system this way
-# round; doing it here makes the medium agree with what it installs.
+# ── networking: NetworkManager, so nmtui works ───────────────────────────────
+# archiso ships iwd + systemd-networkd. nmtui is the friendliest way onto a
+# network from a console, and it is NetworkManager's.
 #
 # systemctl rather than hand-made .wants symlinks: NetworkManager carries
-# Alias= and Also= units for D-Bus activation, and symlinks miss them. That is
-# the same lesson strip-live records for the disable direction.
+# Alias= and Also= units for D-Bus activation, and symlinks miss them.
 systemctl enable  --no-reload NetworkManager.service \
-    || echo "  could not enable NetworkManager; the live session will have no network UI"
+    || echo "  could not enable NetworkManager"
 systemctl disable --no-reload iwd.service systemd-networkd.service \
                               systemd-networkd.socket >/dev/null 2>&1 || true
 
@@ -725,21 +466,15 @@ systemctl disable --no-reload iwd.service systemd-networkd.service \
 # screen. It has to be taken back off, and it has to happen after the enable.
 systemctl disable --no-reload NetworkManager-wait-online.service >/dev/null 2>&1 || true
 
-# And tell NetworkManager to hand DNS to systemd-resolved, explicitly.
-#
-# /etc/resolv.conf is a symlink to resolved's stub, and resolved is enabled —
-# strip-live keeps it that way on purpose. What changed is who produces the
-# DNS: systemd-networkd did, and resolved picked it up from it. NetworkManager
-# does now, and with its default backend it wants to write /etc/resolv.conf
-# itself, which is a symlink it will not overwrite. The result is an address
-# and a route and no name resolution at all — which is exactly what the first
-# medium to ship with NetworkManager did.
+# /etc/resolv.conf is a symlink to resolved's stub. NetworkManager's default
+# backend wants to write that file itself, will not overwrite a symlink, and
+# the result is an address and a route and no name resolution at all — which
+# is exactly what the first medium to ship with NetworkManager did.
 install -d /etc/NetworkManager/conf.d
 cat > /etc/NetworkManager/conf.d/dns-systemd-resolved.conf <<'NMDNS'
 # Written by the starch build. resolv.conf is resolved's stub, so DNS has to
 # go to resolved over D-Bus rather than into a file NetworkManager cannot
-# write. Not left to NetworkManager's auto-detection: this is the one setting
-# standing between a connected machine and a working name lookup.
+# write.
 [main]
 dns=systemd-resolved
 NMDNS
@@ -753,44 +488,25 @@ fi
 exit 0
 CUSTOMIZE
 chmod 755 "$AIR/root/customize_airootfs.sh"
-ok "linker cache stamped at build time, not rebuilt at every boot"
+ok "linker cache stamped at build time, NetworkManager for the console"
 
 # ── the installer ─────────────────────────────────────────────────────────────
 install -d "$AIR/usr/local/bin"
 install -m 755 "$HERE/installer/starch-install" "$AIR/usr/local/bin/starch-install"
-install -m 755 "$HERE/installer/starch-setup"   "$AIR/usr/local/bin/starch-setup"
-ok "installer at /usr/local/bin/{starch-install,starch-setup}"
+ok "installer at /usr/local/bin/starch-install"
 
-# archiso needs every airootfs file's mode declared in profiledef.sh.
-#
-# The trailing slash on the home directory is load-bearing: mkarchiso only
-# recurses when the path ends in "/" (see the chown -fhR branch in
-# /usr/bin/mkarchiso). Without it just the directory is chowned and the whole
-# desktop config underneath stays root-owned, so the live session cannot write
-# to its own ~/.config and Hyprland comes up broken.
-python3 - "$PROFILE" "$LIVE_USER" <<'PY'
+# archiso needs every airootfs file's mode declared in profiledef.sh: it copies
+# the airootfs with --no-preserve=mode, so anything undeclared arrives as 644
+# and a script silently does nothing.
+python3 - "$PROFILE" <<'PY'
 import re, sys, pathlib
-prof, user = pathlib.Path(sys.argv[1]), sys.argv[2]
-pd = prof / "profiledef.sh"
+pd = pathlib.Path(sys.argv[1]) / "profiledef.sh"
 s = pd.read_text()
-extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
-  ["/usr/local/bin/starch-setup"]="0:0:755"
+extra = '''  ["/usr/local/bin/starch-install"]="0:0:755"
+  ["/usr/local/lib/starch/broadcom-live"]="0:0:755"
   ["/usr/local/share/lucent/install.sh"]="0:0:755"
   ["/usr/local/share/lucent/lucent-config/lucent-config"]="0:0:755"
-  ["/usr/local/lib/starch/add-microcode"]="0:0:755"
-  ["/usr/local/lib/starch/live-scale"]="0:0:755"
-  ["/usr/local/lib/starch/broadcom-live"]="0:0:755"
-  ["/usr/local/lib/starch/copy-kernel"]="0:0:755"
-  ["/usr/local/lib/starch/strip-live"]="0:0:755"
-  ["/usr/local/lib/starch/configure-desktop"]="0:0:755"
-  ["/usr/local/lib/starch/live-prepare"]="0:0:755"
-  ["/usr/local/lib/starch/start-installer"]="0:0:755"
-  ["/usr/local/lib/starch/add-plymouth"]="0:0:755"
-  ["/usr/local/lib/starch/splash-cmdline"]="0:0:755"
-  ["/usr/local/lib/starch/boot-entries"]="0:0:755"
   ["/usr/local/share/lucent/config/hypr/scripts/"]="0:0:755"
-  ["/home/{user}/"]="1500:1500:755"
-  ["/etc/sudoers.d/00-live"]="0:0:440"
 '''
 s = re.sub(r'(file_permissions=\(\n)', r'\1' + extra, s, count=1)
 pd.write_text(s)
@@ -800,12 +516,77 @@ PY
 if [[ $ASSEMBLE_ONLY -eq 1 ]]; then
     step "Assembled (not built)"
     echo "    profile: $PROFILE"
-    echo "    packages: $(wc -l < "$PROFILE/packages.x86_64")"
+    echo "    packages: $(wc -l < "$PROFILE/packages.x86_64") on the live system"
+    echo "    offline repository: not assembled (needs root to download)"
     printf '\n    Build it with:  sudo %s\n\n' "$0"
     exit 0
 fi
 
 [[ $EUID -eq 0 ]] || die "mkarchiso needs root:  sudo $0"
+
+# ── the offline repository ────────────────────────────────────────────────────
+# Every package the installer can ask for, with everything they depend on,
+# downloaded into the airootfs beside the official databases they were resolved
+# against. On the medium, pacstrap and install.sh read them through file://
+# servers and check every signature against those databases, exactly as they
+# would from a mirror: the packages are the same files, frozen at build time.
+#
+# What can be asked for:
+#   - what the installer pacstraps, for every machine it might meet: both
+#     microcode packages, btrfs-progs, the splash and the console font
+#   - everything install.sh can install, read out of it by
+#     extract-packages.sh — every GPU vendor's drivers, the Broadcom driver
+#     and its headers, because which of them a machine needs is install.sh's
+#     decision on that machine, not this build's
+#
+# A fresh database directory, so pacman sees nothing as installed and
+# downloads the whole dependency tree. The packages from localrepo/ resolve
+# too, and are kept in their own repository on the medium rather than mixed
+# into the official one.
+step "Downloading the offline repository"
+REPO_DIR="$AIR/usr/share/starch/repo"
+LOCAL_DIR="$AIR/usr/share/starch/local"
+DBPATH="$WORK/offline-db"
+CONF="$WORK/offline-pacman.conf"
+rm -rf "$REPO_DIR" "$LOCAL_DIR" "$DBPATH"
+install -d "$REPO_DIR" "$LOCAL_DIR" "$DBPATH"
+{
+    # Not the build host's [options]: an IgnorePkg or CacheDir there would
+    # quietly change what lands on the medium.
+    printf '[options]\nArchitecture = auto\nSigLevel = Required DatabaseOptional\n'
+    printf 'ParallelDownloads = 5\n'
+    printf '\n[core]\nInclude = /etc/pacman.d/mirrorlist\n'
+    printf '\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n'
+    printf '\n[%s]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$LOCALDB" "$LOCALREPO"
+} > "$CONF"
+
+offline_pkgs=(base linux linux-firmware sudo networkmanager dosfstools
+              intel-ucode amd-ucode btrfs-progs plymouth terminus-font)
+mapfile -t -O "${#offline_pkgs[@]}" offline_pkgs < <("$HERE/extract-packages.sh")
+
+pacman --config "$CONF" --dbpath "$DBPATH" -Sy >/dev/null \
+    || die "could not sync package databases for the offline repository"
+pacman --config "$CONF" --dbpath "$DBPATH" --cachedir "$REPO_DIR" \
+       -Sw --noconfirm "${offline_pkgs[@]}" \
+    || die "could not download the offline repository"
+cp "$DBPATH/sync/core.db" "$DBPATH/sync/extra.db" "$REPO_DIR/"
+
+# The AUR packages go to their own repository, with their own database.
+for f in "$LOCALREPO"/*.pkg.tar.*; do
+    [[ $f == *.sig ]] && continue
+    rm -f "$REPO_DIR/$(basename "$f")"
+done
+cp "$LOCALREPO"/*.pkg.tar.* "$LOCAL_DIR/"
+# repo-add writes starch-local.db as a symlink to the .db.tar.zst; cp follows
+# it, so the medium gets a plain file under the name pacman asks for.
+cp "$LOCALREPO/$LOCALDB".db "$LOCALREPO/$LOCALDB".files "$LOCAL_DIR/" \
+    || die "localrepo/ has no $LOCALDB database — run ./tools/build-aur.sh"
+rm -f "$REPO_DIR"/*.part
+
+n=$(ls "$REPO_DIR"/*.pkg.tar.* 2>/dev/null | grep -vc '\.sig$')
+size=$(du -sh "$REPO_DIR" | cut -f1)
+ok "offline repository: $n packages, $size"
+ok "starch-local: $(ls "$LOCAL_DIR"/*.pkg.tar.* | grep -vc '\.sig$') package(s)"
 
 step "Building"
 echo "    This downloads ~2GB and takes 10-30 minutes."

@@ -5,15 +5,13 @@
 #     cd starch
 #     ./build-all.sh
 #
-# There are two builds and the order between them matters. The AUR packages —
-# Calamares above all — have to exist before mkarchiso can install them, and
-# Calamares has to be the current one, because starch patches its recipe to
-# build a module the AUR skips. An ISO built against a stale Calamares carries
-# an installer that refuses to start, which is a slow way to find out.
+# There are two builds and the order between them matters. The AUR packages
+# have to exist before build.sh can put them in the medium's offline
+# repository, and it refuses to start without them.
 #
 # No options. The two scripts underneath have their own if you need them:
-# ./tools/build-aur.sh --force rebuilds Calamares, ./build.sh --check and
-# --assemble inspect without building.
+# ./tools/build-aur.sh --force rebuilds the AUR packages, ./build.sh --check
+# and --assemble inspect without building.
 #
 # Run it as yourself. makepkg refuses to run as root, so this calls sudo for
 # the ISO step alone and asks then.
@@ -60,7 +58,7 @@ fi
 # ── the AUR packages ──────────────────────────────────────────────────────────
 # Skips whatever is already in localrepo, so this is seconds on a re-run and
 # about twenty minutes on a cold one.
-step "AUR packages (Calamares, firmware)"
+step "AUR packages (Broadcom bluetooth firmware)"
 ./tools/build-aur.sh
 
 # ── the ISO ───────────────────────────────────────────────────────────────────

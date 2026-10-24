@@ -9,15 +9,12 @@ behaviour and the reason for using it rather than just passing `quiet`.
 Escape switches Plymouth to its details view, which renders the boot log. By
 the time the splash is up, systemd has finished and the kernel is quiet with
 `quiet loglevel=3`, so there is nothing left to render: the details view is
-empty and stays empty for the twenty or so seconds Calamares takes to start.
-It looks like the machine has hung. It has not — the installer appears.
+empty until the installer draws. It looks like the machine has hung. It has
+not — the installer appears.
 
 Adding `systemd.show_status=yes` and dropping the loglevel suppression was
 tried and changes nothing, because the problem is not that messages are hidden
-but that none are being produced in that window. Filling the gap needs
-something drawing to the screen while Calamares loads, which means a compositor
-that can paint a background — tried, and reverted, because it cost three
-workarounds and a second compositor in the boot path to centre a window.
+but that none are being produced in that window.
 
 Without Escape the retained splash covers the gap, which is why
 plymouth-quit runs with `--retain-splash`.

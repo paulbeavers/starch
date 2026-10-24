@@ -588,7 +588,24 @@ install -m 755 "$HERE/installer/live-prepare"      "$AIR/usr/local/lib/starch/li
 install -m 755 "$HERE/installer/start-installer"   "$AIR/usr/local/lib/starch/start-installer"
 install -m 755 "$HERE/installer/add-plymouth"      "$AIR/usr/local/lib/starch/add-plymouth"
 install -m 755 "$HERE/installer/splash-cmdline"    "$AIR/usr/local/lib/starch/splash-cmdline"
+install -m 755 "$HERE/installer/boot-entries"      "$AIR/usr/local/lib/starch/boot-entries"
 ok "post-install scripts staged"
+
+# A rescue shell that works. Calamares creates root with a locked password, so
+# emergency mode answered every failed boot with "the root account is locked"
+# and nothing else: a machine that broke after a kernel upgrade could not be
+# looked at without a USB stick. SYSTEMD_SULOGIN_FORCE makes sulogin open the
+# shell regardless. Anyone at the keyboard could already get one through the
+# systemd-boot editor with init=/bin/bash, so this gives nothing away. Lives
+# in the airootfs, so the installed system inherits it with the clone.
+for unit in emergency rescue; do
+    install -d "$AIR/etc/systemd/system/$unit.service.d"
+    cat > "$AIR/etc/systemd/system/$unit.service.d/sulogin-force.conf" <<'EOF'
+[Service]
+Environment=SYSTEMD_SULOGIN_FORCE=1
+EOF
+done
+ok "emergency and rescue mode open a shell with root locked"
 
 # Wireless in the live session. The installed system gets its driver choice
 # from install.sh; the medium has to work it out at boot, on hardware it has
@@ -770,6 +787,7 @@ extra = f'''  ["/usr/local/bin/starch-install"]="0:0:755"
   ["/usr/local/lib/starch/start-installer"]="0:0:755"
   ["/usr/local/lib/starch/add-plymouth"]="0:0:755"
   ["/usr/local/lib/starch/splash-cmdline"]="0:0:755"
+  ["/usr/local/lib/starch/boot-entries"]="0:0:755"
   ["/usr/local/share/lucent/config/hypr/scripts/"]="0:0:755"
   ["/home/{user}/"]="1500:1500:755"
   ["/etc/sudoers.d/00-live"]="0:0:440"

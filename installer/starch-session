@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# What kmscon runs on tty1 of the medium, in place of a login prompt.
+#
+# The installer first. Quitting it leaves a root shell on the same console,
+# which is where someone who quit wants to be; starch-install starts it again.
+#
+# kmscon resets the environment before starting this, so everything the
+# session needs is set here. --resume only after a keyboard-layout restart:
+# the front end saved its answers to state.json and exited 12 so kmscon could
+# come back with the new layout; starch-install left /run/starch/restarting,
+# and this picks up at the disk step.
+export HOME=/root TERM=xterm-256color STARCH_KMSCON=1 LANG=C.UTF-8
+cd /root || exit 1
+
+args=()
+[[ -f /run/starch/restarting ]] && { args=(--resume); rm -f /run/starch/restarting; }
+
+/usr/local/bin/starch-install "${args[@]}"
+if [[ $? -eq 12 ]]; then
+    clear
+    printf '\n  Switching the keyboard layout...\n'
+    # systemd restarts kmscon in a second, which ends this session.
+    sleep infinity
+fi
+
+export STARCH_SHELL=1
+printf '\n  starch-install  runs the installer again.\n\n'
+exec zsh -l

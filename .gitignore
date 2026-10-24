@@ -17,3 +17,5 @@ __pycache__/
 tools/vm-click/click
 tools/vm-click/vp.c
 tools/vm-click/vp-client.h
+# Bytecode from running the installer front end out of the checkout.
+__pycache__/

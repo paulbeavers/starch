@@ -1,0 +1,538 @@
+#!/usr/bin/env bash
+# starch installer, the part that installs.
+#
+#     starch-backend /run/starch/answers.sh
+#
+# The questions are asked by the Textual front end (starch_installer), which
+# writes the answers as a file of shell assignments and runs this. Nothing here
+# is interactive. It does what the Arch install guide does — partition,
+# pacstrap, genfstab, locale, user, systemd-boot — then lucent's install.sh
+# --for-user in a chroot, so the result is a native Arch system with the
+# desktop on it. See "The principle" in starch's CLAUDE.md before adding
+# anything a hand install would not have.
+#
+# Offline. The medium carries every package the install can ask for as pacman
+# repositories under /usr/share/starch: the official core and extra databases
+# exactly as build.sh synced them, with the packages they need beside them, and
+# starch-local for the few from the AUR. pacstrap and install.sh read them
+# through file:// servers and verify signatures against the official databases
+# as they would from a mirror; the installed system is pointed at real mirrors
+# before it is handed over.
+#
+# Output is a line protocol the front end reads. Lines starting "::" are
+# events, everything else is log text, shown live and kept in $LOG:
+#
+#     ::plan <n>        how many steps there will be
+#     ::step <title>    a step begins
+#     ::ok <text>       something finished
+#     ::warn <text>     something worth reading, not fatal
+#     ::fail <text>     the install stopped; the last event
+#     ::done            the install finished; the last event
+set -uo pipefail
+
+ANSWERS="${1:-}"
+LUCENT_SRC=/usr/local/share/lucent
+REPO=/usr/share/starch/repo         # core.db, extra.db and their packages
+LOCALREPO=/usr/share/starch/local   # starch-local.db, from the AUR
+TARGET=/mnt
+WORK=/run/starch
+LOG=/var/log/starch-install.log
+MAPPER=root                         # /dev/mapper/root when encrypted
+ESP_GUID=c12a7328-f81f-11d2-ba4b-00a0c93ec93b
+
+[[ $EUID -eq 0 ]] || { echo "::fail the installer has to run as root"; exit 1; }
+[[ -r $ANSWERS ]] || { echo "::fail no answers file: $ANSWERS"; exit 1; }
+declare -A ANS
+# shellcheck disable=SC1090
+source "$ANSWERS"
+
+mkdir -p "$WORK"
+: >"$LOG"; chmod 600 "$LOG"
+# Everything this prints goes to the front end and to the log.
+exec > >(tee -a "$LOG") 2>&1
+
+say()  { printf '%s\n' "$*"; }
+step() { printf '::step %s\n' "$*"; }
+ok()   { printf '::ok %s\n' "$*"; }
+warn() { printf '::warn %s\n' "$*"; }
+die()  { printf '::fail %s\n' "$*"; exit 1; }
+
+# Run something slow with its output streamed: the front end shows it live,
+# which is the point of having a front end. stdin is /dev/null, so anything
+# that asks a question gets EOF and fails instead of waiting for an answer
+# nobody can see it asking for.
+spin() {
+    local label="$1"; shift
+    say "\$ $label"
+    "$@" </dev/null
+    local rc=$?
+    [[ $rc -eq 0 ]] && ok "$label"
+    return $rc
+}
+
+# The same panel-width test the medium's console font uses. CONSOLE_FONT goes
+# into the installed system's vconsole.conf, so its console and the disk
+# passphrase prompt are readable on a retina panel. 32px is the largest
+# Terminus has, and vconsole.conf cannot double a font the way setfont -d can.
+panel_width() {
+    local f w
+    for f in /sys/class/drm/card*-*/status; do
+        [[ $(cat "$f" 2>/dev/null) == connected ]] || continue
+        w=$(head -1 "${f%/status}/modes" 2>/dev/null | cut -dx -f1)
+        [[ $w =~ ^[0-9]+$ ]] && { echo "$w"; return; }
+    done
+    w=$(cut -d, -f1 /sys/class/graphics/fb0/virtual_size 2>/dev/null)
+    [[ $w =~ ^[0-9]+$ ]] && echo "$w"
+}
+CONSOLE_FONT=""
+w=$(panel_width)
+[[ -n $w && $w -ge 1920 ]] && CONSOLE_FONT=ter-v32b
+
+# The desktop's keyboard layout, written where localectl set-x11-keymap writes
+# it, converted from the console keymap by systemd's own table — the one
+# localectl uses. lucent's install.sh reads this file into Hyprland. US is
+# what everything defaults to, so a US install writes nothing, as by hand.
+write_x11_keyboard() {
+    local km="${ANS[keymap]}" layout model variant options
+    [[ $km == us ]] && return 0
+    read -r _ layout model variant options _ < <(awk -v k="$km" '$1 == k' \
+        "$TARGET/usr/share/systemd/kbd-model-map" 2>/dev/null | head -1)
+    if [[ -z ${layout:-} ]]; then
+        warn "no desktop layout is known for the console keymap $km; the desktop stays US"
+        return 0
+    fi
+    [[ $variant == - ]] && variant=""
+    [[ $options == - ]] && options=""
+    mkdir -p "$TARGET/etc/X11/xorg.conf.d"
+    {
+        echo '# Written by systemd-localed(8), read by systemd-localed and Xorg. It'"'"'s'
+        echo '# probably wise not to edit this file manually. Use localectl(1) to'
+        echo '# update this file.'
+        echo 'Section "InputClass"'
+        echo '        Identifier "system-keyboard"'
+        echo '        MatchIsKeyboard "on"'
+        echo "        Option \"XkbLayout\" \"$layout\""
+        [[ -n $model   ]] && echo "        Option \"XkbModel\" \"$model\""
+        [[ -n $variant ]] && echo "        Option \"XkbVariant\" \"$variant\""
+        [[ -n $options ]] && echo "        Option \"XkbOptions\" \"$options\""
+        echo 'EndSection'
+    } >"$TARGET/etc/X11/xorg.conf.d/00-keyboard.conf"
+    ok "desktop keyboard: $layout${variant:+ ($variant)}"
+}
+
+# Undo the install's borrowing of the medium's repository. Runs on success and
+# on every failure after pacstrap: a target left pointing at a file:// mirror
+# that no longer exists cannot install or update anything after reboot, which
+# is exactly what the first failed install left behind.
+REPO_MOUNTED=0
+release_repo() {
+    if [[ $REPO_MOUNTED -eq 1 ]]; then
+        umount "$TARGET/var/cache/starch-repo" 2>/dev/null
+        rmdir "$TARGET/var/cache/starch-repo" 2>/dev/null
+        REPO_MOUNTED=0
+    fi
+    write_mirrorlist
+}
+
+# Unmount the target and close the LUKS mapping. After a failure as well as a
+# success: left open, they made the disk busy for the next attempt, which then
+# failed before it reached partitioning.
+release_target() {
+    sync
+    umount -R "$TARGET" 2>/dev/null
+    [[ -e /dev/mapper/$MAPPER ]] && cryptsetup close "$MAPPER" 2>/dev/null
+    return 0
+}
+
+fail() {
+    release_repo >/dev/null 2>&1
+    [[ -d $TARGET/var/log ]] && cp "$LOG" "$TARGET/var/log/starch-install.log" 2>/dev/null
+    release_target
+    printf '::fail %s\n' "$*"
+    exit 1
+}
+
+part() { local d="$1" n="$2"; [[ $d =~ [0-9]$ ]] && echo "${d}p$n" || echo "$d$n"; }
+
+# The partition a sgdisk -n just made: whichever exists now that did not
+# before. Partition numbers are not a safe guess on a disk that already has
+# some, and the kernel can take a moment to show the new node.
+new_partition() {
+    local disk="$1" before="$2" p waited=0
+    partprobe "$disk" 2>/dev/null; udevadm settle 2>/dev/null
+    while :; do
+        p=$(comm -13 <(sort <<<"$before") <(lsblk -lnpo NAME "$disk" | sort) | tail -1)
+        [[ -n $p && -b $p ]] && { echo "$p"; return; }
+        sleep 1; waited=$((waited + 1))
+        [[ $waited -ge 10 ]] && return 1
+    done
+}
+
+wait_for() {
+    local waited=0
+    until [[ -b $1 ]]; do
+        sleep 1; waited=$((waited + 1))
+        [[ $waited -ge 10 ]] && return 1
+    done
+}
+
+# ── preflight ─────────────────────────────────────────────────────────────────
+# Everything that can fail while the disk is still intact fails here.
+preflight() {
+    step "Checking the medium"
+    local missing=() t
+    for t in sgdisk wipefs partprobe mkfs.fat mkfs.ext4 pacstrap arch-chroot genfstab \
+             cryptsetup blkid; do
+        command -v "$t" >/dev/null || missing+=("$t")
+    done
+    [[ ${ANS[fstype]} == btrfs ]] && { command -v mkfs.btrfs >/dev/null || missing+=(mkfs.btrfs); }
+    [[ ${#missing[@]} -eq 0 ]] || die "missing on this medium: ${missing[*]}"
+    [[ -f $REPO/core.db && -f $REPO/extra.db ]] || die "the package repository is missing from $REPO"
+    [[ -f $LUCENT_SRC/install.sh ]] || die "the desktop setup is missing from $LUCENT_SRC"
+    [[ -d /sys/firmware/efi ]] || die "this machine booted the medium in BIOS mode; starch installs for UEFI only"
+    ok "tools, packages and the desktop setup are all here"
+
+    mkdir -p "$WORK"
+    release_target      # whatever an earlier attempt left mounted
+
+    # pacstrap reads the official databases and checks every package against
+    # the keys in the live keyring, exactly as it would from a mirror.
+    {
+        printf '[options]\nArchitecture = auto\nSigLevel = Required DatabaseOptional\n'
+        printf 'LocalFileSigLevel = Optional\nParallelDownloads = 5\n'
+        local db
+        for db in core extra multilib; do
+            [[ -f $REPO/$db.db ]] && printf '\n[%s]\nServer = file://%s\n' "$db" "$REPO"
+        done
+        if [[ -f $LOCALREPO/starch-local.db ]]; then
+            printf '\n[starch-local]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$LOCALREPO"
+        fi
+    } >"$WORK/pacman.conf"
+}
+
+# ── disk ──────────────────────────────────────────────────────────────────────
+# Sets ESP, BOOT (the partition mounted at /boot, which is the ESP unless it is
+# too small), ROOT_PART and ROOT_DEV (the mapper device when encrypted).
+partition_erase() {
+    local disk="${ANS[disk]}"
+    step "Partitioning $disk"
+    wipefs -af "$disk" >>"$LOG" 2>&1
+    sgdisk --zap-all "$disk" >>"$LOG" 2>&1
+    sgdisk --clear \
+        --new=1:0:+1GiB --typecode=1:ef00 --change-name=1:EFI \
+        --new=2:0:0     --typecode=2:8300 --change-name=2:starch \
+        "$disk" >>"$LOG" 2>&1 || fail "partitioning failed"
+    partprobe "$disk" 2>/dev/null; udevadm settle 2>/dev/null
+    ESP=$(part "$disk" 1); ROOT_PART=$(part "$disk" 2); BOOT=$ESP; XBOOTLDR=""
+    wait_for "$ESP" && wait_for "$ROOT_PART" || fail "$ESP and $ROOT_PART did not appear"
+    mkfs.fat -F32 -n EFI "$ESP" >>"$LOG" 2>&1 || fail "mkfs.fat failed"
+    ok "$ESP  EFI system partition, 1 GiB"
+    ok "$ROOT_PART  root"
+}
+
+# Into the largest free block, with every existing partition left alone.
+#
+# The existing ESP is shared, so the firmware and systemd-boot see the other
+# system as they did. But Windows makes its ESP 100 MiB, and a kernel with
+# its initramfs does not fit beside Windows' own files. When
+# there is not room, /boot goes on a separate XBOOTLDR partition, which
+# systemd-boot reads natively, and the ESP is mounted at /efi.
+partition_alongside() {
+    local disk="${ANS[disk]}" before esp avail
+    step "Adding partitions to the free space on $disk"
+
+    esp=$(lsblk -lnpo NAME,PARTTYPE "$disk" | awk -v g="$ESP_GUID" 'tolower($2)==g {print $1; exit}')
+    before=$(lsblk -lnpo NAME "$disk")
+    if [[ -z $esp ]]; then
+        sgdisk -n 0:0:+1GiB -t 0:ef00 -c 0:EFI "$disk" >>"$LOG" 2>&1 || fail "could not create an ESP"
+        esp=$(new_partition "$disk" "$before") || fail "the new ESP did not appear"
+        mkfs.fat -F32 -n EFI "$esp" >>"$LOG" 2>&1 || fail "mkfs.fat failed"
+        ok "$esp  new EFI system partition, 1 GiB"
+        before=$(lsblk -lnpo NAME "$disk")
+    else
+        ok "$esp  existing EFI system partition, shared"
+    fi
+    ESP=$esp
+
+    mkdir -p "$WORK/esp"
+    mount -o ro "$ESP" "$WORK/esp" || fail "could not read the existing ESP"
+    avail=$(df -B1 --output=avail "$WORK/esp" | tail -1)
+    umount "$WORK/esp"
+
+    if [[ $avail -ge $((400 * 1024 ** 2)) ]]; then
+        BOOT=$ESP; XBOOTLDR=""
+        ok "$(numfmt --to=iec "$avail") free on it, enough for the kernel"
+    else
+        sgdisk -n 0:0:+1GiB -t 0:ea00 -c 0:XBOOTLDR "$disk" >>"$LOG" 2>&1 \
+            || fail "could not create the /boot partition"
+        XBOOTLDR=$(new_partition "$disk" "$before") || fail "the new /boot partition did not appear"
+        mkfs.fat -F32 -n BOOT "$XBOOTLDR" >>"$LOG" 2>&1 || fail "mkfs.fat failed"
+        BOOT=$XBOOTLDR
+        ok "$XBOOTLDR  /boot, 1 GiB  (only $(numfmt --to=iec "$avail") free on the ESP)"
+        before=$(lsblk -lnpo NAME "$disk")
+    fi
+
+    sgdisk -n 0:0:0 -t 0:8300 -c 0:starch "$disk" >>"$LOG" 2>&1 || fail "could not create the root partition"
+    ROOT_PART=$(new_partition "$disk" "$before") || fail "the new root partition did not appear"
+    ok "$ROOT_PART  root, $(numfmt --to=iec "$(blockdev --getsize64 "$ROOT_PART")")"
+}
+
+encrypt_root() {
+    ROOT_DEV=$ROOT_PART
+    [[ ${ANS[encrypt]} == yes ]] || return 0
+    step "Encrypting $ROOT_PART"
+    # Not through spin(), which gives its command /dev/null for stdin: the
+    # passphrase would be read as empty. luksFormat takes a few seconds.
+    printf '%s' "${ANS[passphrase]}" |
+        cryptsetup luksFormat --type luks2 --batch-mode --key-file=- "$ROOT_PART" >>"$LOG" 2>&1 \
+        || fail "cryptsetup luksFormat failed"
+    printf '%s' "${ANS[passphrase]}" |
+        cryptsetup open --key-file=- "$ROOT_PART" "$MAPPER" >>"$LOG" 2>&1 || fail "could not open $ROOT_PART"
+    ROOT_DEV=/dev/mapper/$MAPPER
+    ok "unlocked as $ROOT_DEV"
+}
+
+format_and_mount() {
+    step "Formatting and mounting"
+    mountpoint -q "$TARGET" && umount -R "$TARGET"
+    mkdir -p "$TARGET"
+
+    # btrfs gets the layout archinstall and most guides use, so snapshot tools
+    # find what they expect: @ at /, @home at /home.
+    if [[ ${ANS[fstype]} == btrfs ]]; then
+        mkfs.btrfs -f -L starch "$ROOT_DEV" >>"$LOG" 2>&1 || fail "mkfs.btrfs failed"
+        mount "$ROOT_DEV" "$TARGET" || fail "mount failed"
+        btrfs subvolume create "$TARGET/@" >>"$LOG" 2>&1 && \
+            btrfs subvolume create "$TARGET/@home" >>"$LOG" 2>&1 || fail "could not create subvolumes"
+        umount "$TARGET"
+        local o=compress=zstd,noatime
+        mount -o "$o,subvol=@" "$ROOT_DEV" "$TARGET" || fail "mount of @ failed"
+        mkdir -p "$TARGET/home"
+        mount -o "$o,subvol=@home" "$ROOT_DEV" "$TARGET/home" || fail "mount of @home failed"
+    else
+        mkfs.ext4 -F -L starch "$ROOT_DEV" >>"$LOG" 2>&1 || fail "mkfs.ext4 failed"
+        mount "$ROOT_DEV" "$TARGET" || fail "mount failed"
+    fi
+
+    # umask 0077: systemd-boot refuses to keep its random seed on a
+    # world-readable filesystem, and genfstab copies these options as given.
+    local vfat=fmask=0077,dmask=0077
+    mkdir -p "$TARGET/boot"
+    mount -o "$vfat" "$BOOT" "$TARGET/boot" || fail "could not mount /boot"
+    if [[ -n $XBOOTLDR ]]; then
+        mkdir -p "$TARGET/efi"
+        mount -o "$vfat" "$ESP" "$TARGET/efi" || fail "could not mount the ESP"
+    fi
+    ok "${ANS[fstype]} on $ROOT_DEV"
+    findmnt -nR "$TARGET" -o TARGET,SOURCE
+}
+
+# ── base system ───────────────────────────────────────────────────────────────
+# What the install guide pacstraps, and nothing more: everything on top comes
+# from install.sh, exactly as it would on a machine installed by hand.
+install_base() {
+    step "Installing Arch"
+    local -a pkgs=(base linux linux-firmware sudo networkmanager dosfstools)
+    case $(awk -F': ' '/^vendor_id/ {print $2; exit}' /proc/cpuinfo) in
+        GenuineIntel) pkgs+=(intel-ucode) ;;
+        AuthenticAMD) pkgs+=(amd-ucode) ;;
+    esac
+    [[ ${ANS[fstype]} == btrfs ]] && pkgs+=(btrfs-progs)
+    # The boot splash is starch's, so it is installed here rather than by
+    # install.sh, which runs on machines starch does not own.
+    pkgs+=(plymouth)
+    [[ -n $CONSOLE_FONT ]] && pkgs+=(terminus-font)
+    # The bluetooth half of the Broadcom chipsets in Intel MacBooks. It is
+    # AUR-only, so a hand-installed Mac would build it with an AUR helper; the
+    # medium carries it prebuilt in starch-local. Wireless is install.sh's job,
+    # including the wl driver and the headers it builds against.
+    if [[ $(cat /sys/class/dmi/id/sys_vendor 2>/dev/null) == "Apple Inc." ]] \
+       && [[ -f $LOCALREPO/starch-local.db ]]; then
+        pkgs+=(broadcom-bt-firmware)
+    fi
+
+    # -K a fresh keyring in the target, populated from archlinux-keyring as it
+    # is installed. -M leaves the medium's mirrorlist behind; the real one is
+    # written once the install no longer needs the local repository.
+    spin "pacstrap: ${pkgs[*]}" pacstrap -K -M -C "$WORK/pacman.conf" "$TARGET" "${pkgs[@]}" \
+        || fail "pacstrap failed"
+    # The mirrorlist pacman-mirrorlist just installed, kept so the real one can
+    # be written from it whatever happens next.
+    cp "$TARGET/etc/pacman.d/mirrorlist" "$WORK/mirrorlist.stock"
+}
+
+configure_system() {
+    step "Configuring the system"
+    local u="${ANS[username]}"
+
+    genfstab -U "$TARGET" >>"$TARGET/etc/fstab"
+    ok "fstab"
+
+    ln -sf "/usr/share/zoneinfo/${ANS[timezone]}" "$TARGET/etc/localtime"
+    arch-chroot "$TARGET" hwclock --systohc >>"$LOG" 2>&1
+    sed -i 's/^#\(en_US.UTF-8 UTF-8\)/\1/' "$TARGET/etc/locale.gen"
+    arch-chroot "$TARGET" locale-gen >>"$LOG" 2>&1
+    echo "LANG=en_US.UTF-8" >"$TARGET/etc/locale.conf"
+    echo "KEYMAP=${ANS[keymap]}" >"$TARGET/etc/vconsole.conf"
+    write_x11_keyboard
+    [[ -n $CONSOLE_FONT ]] && echo "FONT=$CONSOLE_FONT" >>"$TARGET/etc/vconsole.conf"
+    echo "${ANS[hostname]}" >"$TARGET/etc/hostname"
+    ok "${ANS[timezone]}, en_US.UTF-8, keyboard ${ANS[keymap]}, hostname ${ANS[hostname]}"
+
+    arch-chroot "$TARGET" useradd -m -G wheel -s /bin/bash "$u" >>"$LOG" 2>&1 \
+        || fail "could not create $u"
+    printf '%s:%s\n' "$u" "${ANS[password]}" | arch-chroot "$TARGET" chpasswd \
+        || fail "could not set the password"
+    echo '%wheel ALL=(ALL:ALL) ALL' >"$TARGET/etc/sudoers.d/10-wheel"
+    chmod 440 "$TARGET/etc/sudoers.d/10-wheel"
+    ok "$u, with sudo through the wheel group"
+
+    # Root keeps the locked password pacstrap gave it, which makes emergency
+    # mode useless: it asks for root's password and there is none. sulogin
+    # --force opens the shell anyway. Anyone at the keyboard can already get
+    # one through the boot menu's editor with init=/bin/bash.
+    local unit
+    for unit in emergency rescue; do
+        mkdir -p "$TARGET/etc/systemd/system/$unit.service.d"
+        printf '[Service]\nEnvironment=SYSTEMD_SULOGIN_FORCE=1\n' \
+            >"$TARGET/etc/systemd/system/$unit.service.d/sulogin-force.conf"
+    done
+    ok "emergency mode opens a shell with root locked"
+    # Enabling the network manager is an install-guide step, so it happens
+    # here, not only in install.sh: when install.sh failed, the machine came
+    # up with NetworkManager installed and nothing started it, so it had no
+    # network to fix itself with. Nothing else is enabled here.
+    arch-chroot "$TARGET" systemctl enable NetworkManager.service >>"$LOG" 2>&1
+    ok "NetworkManager enabled"
+}
+
+# ── boot ──────────────────────────────────────────────────────────────────────
+# systemd-boot, with entries naming /vmlinuz-linux and the preset's images.
+# Those are the files mkinitcpio's pacman hooks rewrite on every kernel
+# upgrade, so the entries never go stale.
+install_boot() {
+    step "Installing the bootloader"
+    local conf="$TARGET/etc/mkinitcpio.conf" opts root_uuid luks_uuid
+
+    if [[ ${ANS[encrypt]} == yes ]]; then
+        luks_uuid=$(blkid -s UUID -o value "$ROOT_PART")
+        # The systemd-based initramfs is mkinitcpio's default and wants
+        # sd-encrypt; a config still on the busybox hooks wants encrypt and a
+        # different kernel argument. Either way the hook goes after block,
+        # where the disk exists, and after keyboard, so the passphrase can
+        # be typed.
+        if grep -qE '^HOOKS=.*\bsystemd\b' "$conf"; then
+            sed -i -E '/^HOOKS=/ s/\bblock\b/block sd-encrypt/' "$conf"
+            opts="rd.luks.name=$luks_uuid=$MAPPER root=/dev/mapper/$MAPPER"
+        else
+            sed -i -E '/^HOOKS=/ s/\bblock\b/block encrypt/' "$conf"
+            opts="cryptdevice=UUID=$luks_uuid:$MAPPER root=/dev/mapper/$MAPPER"
+        fi
+    else
+        root_uuid=$(blkid -s UUID -o value "$ROOT_DEV")
+        opts="root=UUID=$root_uuid"
+    fi
+    opts+=" rw"
+    [[ ${ANS[fstype]} == btrfs ]] && opts+=" rootflags=subvol=@"
+
+    # The splash: starch's theme from this medium, and the plymouth hook
+    # straight after whichever of systemd or udev starts the initramfs. It has
+    # to come before sd-encrypt too, or the passphrase is asked for on a text
+    # console behind the splash. Escape still shows the text at any point.
+    mkdir -p "$TARGET/usr/share/plymouth/themes/starch"
+    cp /usr/share/plymouth/themes/starch/* "$TARGET/usr/share/plymouth/themes/starch/"
+    printf '[Daemon]\nTheme=starch\nShowDelay=0\n' >"$TARGET/etc/plymouth/plymouthd.conf"
+    sed -i -E '/^HOOKS=/ s/\b(systemd|udev)\b/\1 plymouth/' "$conf"
+    grep -qE '^HOOKS=.*\bplymouth\b' "$conf" || warn "could not add the plymouth hook; no splash"
+    opts+=" quiet splash loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0"
+
+    spin "Building the initramfs" arch-chroot "$TARGET" mkinitcpio -P || fail "mkinitcpio failed"
+
+    local -a paths=(--esp-path=/boot)
+    [[ -n $XBOOTLDR ]] && paths=(--esp-path=/efi --boot-path=/boot)
+    spin "bootctl install" arch-chroot "$TARGET" bootctl install "${paths[@]}" \
+        || fail "bootctl install failed"
+
+    local entries="$TARGET/boot/loader/entries" loader
+    loader="$TARGET$( [[ -n $XBOOTLDR ]] && echo /efi || echo /boot)/loader/loader.conf"
+    mkdir -p "$entries"
+    # One entry. mkinitcpio's preset builds only the default image now, so a
+    # fallback entry would name a file that does not exist.
+    printf 'title   starch\nlinux   /vmlinuz-linux\ninitrd  /initramfs-linux.img\noptions %s\n' \
+        "$opts" >"$entries/starch.conf"
+    printf 'default starch.conf\ntimeout 3\neditor  yes\n' >"$loader"
+    ok "systemd-boot, entry starch"
+    [[ -n $XBOOTLDR ]] && ok "ESP at /efi, kernels on the XBOOTLDR partition at /boot"
+}
+
+# ── the desktop ───────────────────────────────────────────────────────────────
+# install.sh in the chroot, reading packages from the medium. Its pacman sees
+# the stock /etc/pacman.conf, as it would anywhere, and only the mirrorlist
+# behind it points at the local repository while it runs — so the tuning
+# install.sh writes into pacman.conf is the tuning the installed system keeps.
+install_desktop() {
+    step "Installing the Hyprland desktop"
+    local u="${ANS[username]}" home="/home/${ANS[username]}"
+
+    cp -r "$LUCENT_SRC" "$TARGET$home/lucent" || fail "could not copy the desktop setup"
+    arch-chroot "$TARGET" chown -R "$u:$u" "$home/lucent"
+
+    # Not under /run or /tmp: arch-chroot mounts a fresh tmpfs over both inside
+    # the chroot, which hid a bind mount at /run/starch-repo and failed every
+    # install at this step with "could not find core.db".
+    mkdir -p "$TARGET/var/cache/starch-repo"
+    mount --bind "$REPO" "$TARGET/var/cache/starch-repo" || fail "could not mount the repository"
+    echo 'Server = file:///var/cache/starch-repo' >"$TARGET/etc/pacman.d/mirrorlist"
+    REPO_MOUNTED=1
+
+    # Through bash rather than executed: mkarchiso copies the payload with
+    # --no-preserve=mode, so install.sh arrives without its execute bit.
+    spin "install.sh --for-user $u" \
+        arch-chroot "$TARGET" bash "$home/lucent/install.sh" --for-user "$u"
+    local rc=$?
+
+    release_repo
+    [[ $rc -eq 0 ]] || fail "the desktop install failed. Arch itself is installed and boots;
+    after rebooting, log in and run:  ~/lucent/install.sh"
+}
+
+# The mirrorlist pacman-mirrorlist ships, with the worldwide geo mirror turned
+# on: it redirects to a nearby mirror, which is what a fresh install wants
+# until someone ranks them. rate-mirrors, from install.sh, does that properly.
+write_mirrorlist() {
+    local ml="$TARGET/etc/pacman.d/mirrorlist"
+    [[ -f $WORK/mirrorlist.stock ]] || return 0
+    cp "$WORK/mirrorlist.stock" "$ml"
+    if grep -q '^#Server = https://geo.mirror.pkgbuild.com' "$ml"; then
+        sed -i 's|^#\(Server = https://geo.mirror.pkgbuild.com\)|\1|' "$ml"
+    else
+        sed -i '1i Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch' "$ml"
+    fi
+    ok "mirrorlist: geo.mirror.pkgbuild.com  (rank mirrors with rate-mirrors)"
+}
+
+finish() {
+    step "Finishing"
+    release_repo
+    cp "$LOG" "$TARGET/var/log/starch-install.log" && chmod 600 "$TARGET/var/log/starch-install.log"
+    ok "this install's log is at /var/log/starch-install.log"
+    release_target
+    echo "::done"
+}
+
+# ── main ──────────────────────────────────────────────────────────────────────
+steps=8; [[ ${ANS[encrypt]} == yes ]] && steps=9
+echo "::plan $steps"
+preflight
+# Nothing before this line has touched a disk.
+case ${ANS[mode]} in
+    erase)     partition_erase ;;
+    alongside) partition_alongside ;;
+esac
+encrypt_root
+format_and_mount
+install_base
+configure_system
+install_boot
+install_desktop
+finish

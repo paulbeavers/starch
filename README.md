@@ -49,7 +49,9 @@ own repository and is pinned here as a submodule:
 ```
 build.sh              assembles the archiso profile and runs mkarchiso
 extract-packages.sh   derives the package list from the submodule's install.sh
-installer/            starch-install, the installer; broadcom-live, for the
+installer/            the installer: starch_installer (the Textual front end),
+                      starch-backend (the install), starch-install and
+                      starch-session (launchers); broadcom-live, for the
                       medium's own wireless
 splash/               the Plymouth theme both boots wear
 tools/build-aur.sh    builds what the official repos do not carry
@@ -138,10 +140,13 @@ sudo pacman -S qemu-desktop edk2-ovmf
 
 ## What the ISO is
 
-A text installer that needs no network. The medium boots to tty1, where root is
-logged in and the installer starts. It asks its questions with
-[gum](https://github.com/charmbracelet/gum), shows every answer back on one
-summary, and writes nothing to any disk until you choose Install. Quitting it
+A full-screen text installer that needs no network. The medium boots straight
+into it on tty1: a [Textual](https://textual.textualize.io) app drawn on
+[kmscon](https://github.com/kmscon/kmscon), so it has real fonts sized to the
+panel, full colour and the mouse rather than the Linux console's bitmap font.
+It walks through four steps with a sidebar, shows every answer back on a review
+page, and writes nothing to any disk until you confirm. The install then runs
+with a step list, a progress bar and its log streaming beside them. Quitting
 leaves a root shell, as on any Arch medium; `starch-install` starts it again.
 
 It asks for the keyboard layout, the disk, and how to use it — the whole disk,
@@ -193,10 +198,10 @@ the worst possible place to find out.
 
 | Layer | Source |
 |---|---|
-| Live system | releng, plus gum, the disk tools and the splash |
+| Live system | releng, plus Textual, kmscon, the disk tools and the splash |
 | Offline repository | `extract-packages.sh` (from `install.sh`) and the installer's own list, resolved by pacman at build time |
 | AUR packages | `localrepo/`, built by `tools/build-aur.sh` |
-| The installer | `installer/starch-install` |
+| The installer | `installer/` — Textual front end, bash back end |
 | The desktop repo | the `lucent` submodule, by allowlist |
 | Boot behaviour | tty1 runs the installer; other VTs are root shells |
 

@@ -64,7 +64,7 @@ needs root to download.
 `extract-packages.sh` reads the `PKGS_*` arrays out of `install.sh`, so a
 package added there lands in the medium's offline repository too. Never
 maintain a second list. The installer's own pacstrap list is the one exception,
-and it appears twice — `install_base` in `installer/starch-install` and
+and it appears twice — `install_base` in `installer/starch-backend` and
 `offline_pkgs` in `build.sh`. Change both, or the installer asks the repository
 for a package it does not have.
 
@@ -99,8 +99,12 @@ left machines unbootable; logind ignored the lid; the journal lived in RAM;
 installed as explicit. Nothing about a clone is native by construction, so it
 was replaced. **Do not reintroduce copying the medium** to save install time.
 
-`installer/starch-install` runs what the Arch install guide runs, then
-`install.sh --for-user` in a chroot. Things that are not visible from it:
+`installer/starch-backend` runs what the Arch install guide runs, then
+`install.sh --for-user` in a chroot. It asks nothing: `installer/starch_installer`,
+a Textual app, asks the questions, writes the answers to `/run/starch/answers.sh`
+and drives the back end through a line protocol (`::step`, `::ok`, `::fail`,
+`::done`; anything else is log). `installer/starch-install` launches it.
+Things that are not visible from the code:
 
 - **Offline, through file:// servers.** `build.sh` resolves every package the
   install can ask for against a fresh database and downloads the closure into
@@ -122,9 +126,29 @@ was replaced. **Do not reintroduce copying the medium** to save install time.
 - **Root is locked, so emergency mode needs `SYSTEMD_SULOGIN_FORCE=1`** on
   `emergency.service` and `rescue.service`, or it answers every failed boot
   with "the root account is locked".
-- **gum on the Linux console:** colours by ANSI number (sixteen exist), border
-  `normal` (rounded arcs are missing from console fonts), and the spinner is
-  ASCII for the same reason.
+- **The front end draws on kmscon, not the Linux console.** The raw console
+  has sixteen CGA colours, a bitmap font and no scaling; a gum installer on it
+  was unreadable on a retina MacBook (dark blue on black, tiny text, pushed to
+  one side). kmscon sizes its font from the panel. Its unit falls back to
+  getty@tty1 on failure, where `.zlogin` starts the installer on the plain
+  console and `starch-install` sets a doubled Terminus and the palette.
+- **kmscon only has the glyphs JetBrains Mono has** — the freetype engine does
+  no fallback. ◐◓◑◒, braille spinners, ⬤ ✔ ✘ are all missing and draw as boxes.
+  Check a new symbol with `fc-query` before using it. Block elements (▊▌▀)
+  are in the font but drawn shorter than the cell, so Textual's default
+  `tall` and `thick` borders break into stubs; `app.tcss` gives every
+  bordered widget a box-drawing border (`round`, `heavy`) instead. The
+  headless screenshots do not show this — only a screendump of kmscon does.
+- **kmscon reads the keyboard layout at start, through xkb.** Choosing a
+  non-US layout rewrites `xkb-layout` in `/etc/kmscon/kmscon.conf`, saves the
+  answers, exits 12 and restarts kmscon; the session resumes at the disk step.
+  Without that, passwords would be typed in US layout and not work after boot.
+- **Test the front end without a VM:** `STARCH_FAKE=1` gives fake disks and a
+  fake back end (`fake-backend.sh`, `FAKE_FAIL=<step>` to fail one), and
+  Textual's `App.run_test()` drives it and saves screenshots. **Test the
+  install itself in a VM before calling it done** — the first pacstrap
+  installer shipped untested and failed on every machine (arch-chroot hides
+  `/run`).
 
 ## MacBooks: where the support lives now
 
@@ -136,9 +160,9 @@ moved several of them. Before removing any, read why it is there.
 |---|---|---|
 | wl driver choice and blacklist | lucent `install.sh` (`detect_broadcom_wifi`, `WL_IDS`) | BCM4360 in the 13" needs `wl`. BCM43602 in the 15" is brcmfmac's; listing it left the 15" with no wireless |
 | Kernel headers with `broadcom-wl-dkms` | lucent `install.sh` | dkms lists headers as optional; without them no module builds. The clone carried headers and hid it |
-| Bluetooth firmware | `starch-install` pacstraps `broadcom-bt-firmware` from `starch-local` when DMI says Apple | AUR-only; reached installs only through the clone before |
+| Bluetooth firmware | `starch-backend` pacstraps `broadcom-bt-firmware` from `starch-local` when DMI says Apple | AUR-only; reached installs only through the clone before |
 | Live wireless | `installer/broadcom-live`, plus `broadcom-wl-dkms dkms linux-headers` in the live package list | the medium has to pick the driver at boot, before NetworkManager |
-| Retina console font | `starch-install` (`pick_console_font`), and `FONT=` in the target's vconsole.conf | 8x16 on 2560/2880-wide panels is unreadable — including the LUKS prompt |
+| Retina console | kmscon on the medium; `starch-install` doubles Terminus on the plain-console fallback; `FONT=ter-v32b` in the target's vconsole.conf | 8x16 on 2560/2880-wide panels is unreadable — including the LUKS prompt |
 | Mac keyboard, notch, Parallels | lucent | see lucent's CLAUDE.md |
 
 Two lessons from the live desktop, kept because they are about the hardware,

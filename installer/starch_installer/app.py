@@ -18,6 +18,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Center, Horizontal, Middle, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
+from textual.theme import Theme
 from textual.widgets import (
     Button, ContentSwitcher, DataTable, Input, Label, OptionList, ProgressBar,
     RadioButton, RadioSet, RichLog, Static, Switch,
@@ -34,6 +35,50 @@ LOGO = r"""
 ███████║   ██║   ██║  ██║██║  ██║╚██████╗██║  ██║
 ╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝
 """.strip("\n")
+
+# starch's colours, as on the website and the boot splash: the sapphire-to-
+# blue gradient with lavender at the top of the mark, on Catppuccin's darkest
+# base. Text is brighter than Catppuccin's and muted text much brighter than
+# Textual's dimmed default: on a console across the room, contrast is what
+# makes it readable.
+SAPPHIRE, BLUE, LAVENDER = "#74c7ec", "#89b4fa", "#b4befe"
+GREEN, YELLOW, RED = "#a6e3a1", "#f9e2af", "#f7768e"
+
+STARCH_THEME = Theme(
+    name="starch",
+    primary=SAPPHIRE,
+    secondary=BLUE,
+    accent=LAVENDER,
+    success=GREEN,
+    warning=YELLOW,
+    error=RED,
+    foreground="#e6e9f8",
+    background="#11111b",
+    surface="#1a1a28",
+    panel="#232336",
+    dark=True,
+    text_alpha=1.0,
+    variables={
+        "text-muted": "#b6bcd2",
+        "input-selection-background": f"{SAPPHIRE} 40%",
+        "footer-key-foreground": SAPPHIRE,
+    },
+)
+
+
+def logo() -> Text:
+    """The block letters in the splash's gradient, lavender down to sapphire."""
+    rgb = lambda c: [int(c[i:i + 2], 16) for i in (1, 3, 5)]  # noqa: E731
+    top, bottom = rgb(LAVENDER), rgb(SAPPHIRE)
+    rows = LOGO.splitlines()
+    t = Text()
+    for n, row in enumerate(rows):
+        f = n / (len(rows) - 1)
+        colour = "".join(f"{round(a + (b - a) * f):02x}" for a, b in zip(top, bottom))
+        t.append(row, style=f"bold #{colour}")
+        if n < len(rows) - 1:
+            t.append("\n")
+    return t
 
 STEPS = ["Keyboard", "Disk", "Account", "Review"]
 
@@ -77,7 +122,7 @@ class Welcome(Screen):
     def compose(self) -> ComposeResult:
         with Middle():
             with Center():
-                yield Static(LOGO, id="logo")
+                yield Static(logo(), id="logo")
             with Center():
                 yield Label("Arch Linux  +  Hyprland", id="tagline")
             with Center():
@@ -119,17 +164,17 @@ class Sidebar(Static):
 
     def show(self, current: int) -> None:
         t = Text()
-        t.append("starch\n\n", style="bold #89b4fa")
+        t.append("starch\n\n", style=f"bold {SAPPHIRE}")
         for i, name in enumerate(STEPS):
             if i < current:
-                t.append("  ✓  ", style="bold #a6e3a1")
+                t.append("  ✓  ", style=f"bold {GREEN}")
                 t.append(f"{name}\n\n", style="")
             elif i == current:
-                t.append("  ●  ", style="bold #89b4fa")
+                t.append("  ●  ", style=f"bold {SAPPHIRE}")
                 t.append(f"{name}\n\n", style="bold")
             else:
-                t.append("  ○  ", style="dim")
-                t.append(f"{name}\n\n", style="dim")
+                t.append("  ○  ", style="#7f849c")
+                t.append(f"{name}\n\n", style="#b6bcd2")
         self.update(t)
 
 
@@ -454,7 +499,7 @@ class Wizard(Screen):
         warn = self.query_one("#warning", Static)
         if a["mode"] == "erase":
             warn.update(Text(f"Everything on {a['disk']} will be erased:\n" + "\n".join(d.partitions or ["(empty)"]),
-                             style="bold #f38ba8"))
+                             style=f"bold {RED}"))
         else:
             warn.update("")
 
@@ -528,8 +573,8 @@ class Steps(Static):
         spin = "▖▘▝▗"[self.frame % 4]
         t = Text()
         for state, title in self.items:
-            icon, style = {"run": (spin, "bold #89b4fa"), "ok": ("✓", "bold green"),
-                           "fail": ("✗", "bold red")}[state]
+            icon, style = {"run": (spin, f"bold {SAPPHIRE}"), "ok": ("✓", f"bold {GREEN}"),
+                           "fail": ("✗", f"bold {RED}")}[state]
             t.append(f" {icon}  ", style=style)
             t.append(f"{title}\n", style="bold" if state == "run" else "")
         self.update(t)
@@ -581,22 +626,22 @@ class Installing(Screen):
             steps.items.append(("run", text))
             self.done_steps = len(steps.items) - 1
             self.query_one(ProgressBar).update(progress=100 * self.done_steps / self.planned)
-            log.write(Text(f"\n── {text}", style="bold #89b4fa"))
+            log.write(Text(f"\n── {text}", style=f"bold {SAPPHIRE}"))
             status.update(text)
         elif kind == "ok":
-            log.write(Text(f"✓ {text}", style="#a6e3a1"))
+            log.write(Text(f"✓ {text}", style=GREEN))
         elif kind == "warn":
-            log.write(Text(f"! {text}", style="bold #f9e2af"))
+            log.write(Text(f"! {text}", style=f"bold {YELLOW}"))
         elif kind == "fail":
             steps.items = [("fail", t) if s == "run" else (s, t) for s, t in steps.items]
-            log.write(Text(f"✗ {text}", style="bold #f38ba8"))
-            status.update(Text(f"The install stopped: {text}", style="bold #f38ba8"))
+            log.write(Text(f"✗ {text}", style=f"bold {RED}"))
+            status.update(Text(f"The install stopped: {text}", style=f"bold {RED}"))
             self.end(ok=False)
         elif kind == "done":
             steps.items = [("ok", t) for _, t in steps.items]
             self.query_one(ProgressBar).update(progress=100)
             status.update(Text(f"starch is installed. Remove the USB stick, reboot, and log in as "
-                               f"{self.answers['username']}.", style="bold #a6e3a1"))
+                               f"{self.answers['username']}.", style=f"bold {GREEN}"))
             self.end(ok=True)
         steps.render_steps()
 
@@ -662,7 +707,8 @@ class StarchInstaller(App):
     ENABLE_COMMAND_PALETTE = False
 
     def on_mount(self) -> None:
-        self.theme = "catppuccin-mocha"
+        self.register_theme(STARCH_THEME)
+        self.theme = "starch"
         # Back from a kmscon restart for the keyboard layout: carry on where
         # the person was, not at the welcome screen.
         if system.load_state().get("keymap") and "--resume" in sys.argv:

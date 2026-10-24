@@ -36,9 +36,10 @@ if [[ $TERM == linux ]]; then
     if [[ -n $w && $w -ge 2560 ]]; then setfont -d ter-v24b 2>/dev/null
     elif [[ -n $w && $w -ge 1920 ]]; then setfont ter-v32b 2>/dev/null
     fi
-    # Catppuccin Mocha over the CGA palette, entry by entry (ESC ] P n rrggbb).
-    for e in 01e1e2e 1f38ba8 2a6e3a1 3f9e2af 489b4fa 5f5c2e7 694e2d5 7cdd6f4 \
-             8585b70 9f38ba8 Aa6e3a1 Bf9e2af C89b4fa Df5c2e7 E94e2d5 Fcdd6f4; do
+    # Catppuccin Mocha over the CGA palette, entry by entry (ESC ] P n rrggbb),
+    # with starch's lavender in the magenta slots rather than pink.
+    for e in 01e1e2e 1f38ba8 2a6e3a1 3f9e2af 489b4fa 5b4befe 694e2d5 7cdd6f4 \
+             8585b70 9f38ba8 Aa6e3a1 Bf9e2af C89b4fa Db4befe E94e2d5 Fcdd6f4; do
         printf '\e]P%s' "$e"
     done
     clear

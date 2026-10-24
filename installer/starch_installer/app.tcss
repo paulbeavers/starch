@@ -1,4 +1,4 @@
-/* starch installer. Catppuccin Mocha comes from the theme; this is layout.
+/* starch installer. The colours are the starch theme in app.py; this is layout.
  *
  * Everything sits in a centred frame with a ceiling on its size, so a 120x37
  * retina console and a 240x67 4K one show the same installer, not one
@@ -11,7 +11,7 @@ Screen {
 /* kmscon draws block elements shorter than the cell, so Textual's default
  * "tall" and "thick" borders, which are made of them, break into stubs down
  * each side. Box-drawing borders join up; every bordered widget uses one. */
-Input, RadioSet, Switch { border: round $primary 30%; }
+Input, RadioSet, Switch { border: round $primary 60%; }
 Input:focus, RadioSet:focus, Switch:focus { border: round $primary; }
 
 .hidden { display: none; }
@@ -50,7 +50,7 @@ Input:focus, RadioSet:focus, Switch:focus { border: round $primary; }
     width: 22;
     height: 100%;
     padding: 1 2;
-    border-right: solid $primary 40%;
+    border-right: solid $primary 70%;
     background: $panel;
 }
 
@@ -76,14 +76,14 @@ Input:focus, RadioSet:focus, Switch:focus { border: round $primary; }
 
 /* ── keyboard ────────────────────────────────────────────────────────────── */
 
-#keymaps, #keymap-all { height: 1fr; border: round $primary 30%; }
+#keymaps, #keymap-all { height: 1fr; border: round $primary 60%; }
 #keymaps:focus, #keymap-all:focus { border: round $primary; }
 #keymap-search { margin-bottom: 1; }
 #keytest { margin-top: 1; }
 
 /* ── disk ────────────────────────────────────────────────────────────────── */
 
-#disks { height: auto; max-height: 8; border: round $primary 30%; }
+#disks { height: auto; max-height: 8; border: round $primary 60%; }
 #disks:focus { border: round $primary; }
 #disk-contents { height: auto; max-height: 6; padding: 0 1; margin: 1 0; }
 #disk-options { height: auto; margin-top: 1; }
@@ -98,12 +98,12 @@ RadioSet { width: 100%; }
 .field { width: 1fr; height: auto; padding-right: 2; }
 .flabel { color: $text-muted; }
 .flabel.inline { width: auto; padding: 1 2 0 0; }
-#timezones { height: 7; border: round $primary 30%; }
+#timezones { height: 7; border: round $primary 60%; }
 #timezones:focus { border: round $primary; }
 
 /* ── review ──────────────────────────────────────────────────────────────── */
 
-#review { height: auto; border: round $primary 30%; padding: 0 1; overflow: hidden hidden; }
+#review { height: auto; border: round $primary 60%; padding: 0 1; overflow: hidden hidden; }
 #warning { margin-top: 1; height: auto; }
 
 /* ── dialogs ─────────────────────────────────────────────────────────────── */
@@ -127,7 +127,7 @@ Confirm { align: center middle; background: $background 60%; }
 #progress { margin-bottom: 1; width: 100%; }
 #progress Bar { width: 1fr; }
 #install-body { height: 1fr; }
-#steps { width: 42; height: 100%; padding: 1 1; border-right: solid $primary 40%; }
+#steps { width: 42; height: 100%; padding: 1 1; border-right: solid $primary 70%; }
 #log {
     height: 100%;
     padding: 0 1;

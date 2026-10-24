@@ -11,7 +11,9 @@ fiddly to configure. starch does that first hour for you.
 What it deliberately does *not* do is stay. Once the install finishes there is
 no starch on the machine:
 
-- **No custom repository.** Every package comes from the official Arch repos.
+- **No custom repository.** Every package comes from the official Arch repos,
+  with one exception: on an Intel MacBook, the Broadcom bluetooth firmware,
+  which only the AUR has. It is installed as an ordinary foreign package.
 - **No branding.** `/etc/os-release` says Arch, because it is Arch.
 - **No hooks, agents or self-updates.** Nothing runs that you did not put there.
 - **No framework to learn.** Updates are `pacman -Syu`, the same as any Arch
@@ -23,12 +25,21 @@ file you can read, edit or delete, and the comments in those files explain what
 each choice does and why — so the setup is a starting point you can learn from
 rather than a black box you maintain around.
 
+**The installed system is the one you would get by hand.** That is the design
+principle, and it is not negotiable: the result must be the same as installing
+Arch from the install guide and then running lucent's `install.sh`. The only
+deliberate differences are the boot splash, a rescue shell that works with root
+locked, a readable console font on high-density panels, and the Broadcom
+bluetooth firmware on Intel MacBooks. The installer runs
+pacstrap, then lucent's `install.sh` in a chroot — what someone following the
+Arch install guide does before cloning the desktop and running its script. It
+does not copy the medium onto the disk, so there is nothing of the medium to
+remove afterwards.
+
 The configuration lands in `~/.config`, where Hyprland and everything else
-look for it. The repository it came from stays at
-`/usr/local/share/lucent` — `configure-desktop` runs `install.sh
---for-user` out of there and leaves it in place — so the source of every
-choice is readable on the installed machine and `install.sh` can be re-run.
-Delete that directory and nothing stops working.
+look for it. The repository it came from is left at `~/lucent`, owned by you,
+so the source of every choice is readable on the installed machine and
+`install.sh` can be re-run. Delete that directory and nothing stops working.
 
 ## Layout
 
@@ -38,8 +49,9 @@ own repository and is pinned here as a submodule:
 ```
 build.sh              assembles the archiso profile and runs mkarchiso
 extract-packages.sh   derives the package list from the submodule's install.sh
-calamares/            installer sequence, module config and branding
-installer/            scripts the install runs, plus the text-menu fallback
+installer/            starch-install, the installer; broadcom-live, for the
+                      medium's own wireless
+splash/               the Plymouth theme both boots wear
 tools/build-aur.sh    builds what the official repos do not carry
 test-boot.sh          boots the result in QEMU
 lucent/               submodule: the desktop install and config
@@ -93,19 +105,19 @@ run as root, so the script calls `sudo` for the ISO step alone and asks then.
 The scripts underneath keep their own options for when you need them, listed
 below.
 
-The order matters more than it looks. Two packages are not in the official
-repositories — Calamares itself, and the Broadcom bluetooth firmware — and
-`mkarchiso` installs from repositories, not from files, so they are built first
-into `localrepo/`, which `build.sh` adds to the profile's pacman.conf.
+The order matters more than it looks. One package is not in the official
+repositories — the Broadcom bluetooth firmware for Intel MacBooks — so it is
+built first into `localrepo/`, and `build.sh` refuses to start without it.
 `localrepo/` is gitignored because it holds built packages rather than source,
-so a fresh clone has to build them before its first ISO.
-
-Rebuilding Calamares takes twenty minutes and nothing about it changes between
-ISOs, so both scripts skip it when it is already built; `./tools/build-aur.sh --force`
-rebuilds anyway.
+so a fresh clone has to build it before its first ISO. Both scripts skip it
+when it is already built; `./tools/build-aur.sh --force` rebuilds anyway.
 
 Everything else — including, perhaps surprisingly, `broadcom-wl-dkms` — comes
 from the official repositories.
+
+The real build needs root and a network: besides running `mkarchiso`, it
+downloads every package the installer can ask for into the medium's offline
+repository, about 2GB.
 
 Other useful modes:
 
@@ -126,42 +138,50 @@ sudo pacman -S qemu-desktop edk2-ovmf
 
 ## What the ISO is
 
-A live desktop that installs itself. tty1 starts Hyprland, and the session
-starts Calamares. That is not decoration: it is what gives the medium a network
-applet, a terminal and a file manager, so someone can join a wifi network and
-check the machine works before committing a disk to it. An installer alone
-cannot do any of that.
+A text installer that needs no network. The medium boots to tty1, where root is
+logged in and the installer starts. It asks its questions with
+[gum](https://github.com/charmbracelet/gum), shows every answer back on one
+summary, and writes nothing to any disk until you choose Install. Quitting it
+leaves a root shell, as on any Arch medium; `starch-install` starts it again.
 
-Quitting Calamares leaves the desktop running. Logging out, or a desktop that
-will not start at all, falls through to a text menu with the older installer, a
-shell and this boot's log.
+It asks for the keyboard layout, the disk, and how to use it — the whole disk,
+or the largest block of free space with every existing partition left alone —
+then the filesystem (ext4, or btrfs with `@` and `@home`), whether to encrypt
+it with LUKS, a hostname, a user and password, and the timezone.
+
+Installing alongside another system never shrinks or moves anything: the free
+space has to exist already, made with that system's own tools. The existing
+EFI system partition is shared. Windows makes its ESP 100MB, which a kernel and
+its initramfs do not fit beside, so when it is short of room `/boot` goes on a
+1GB XBOOTLDR partition of its own, which systemd-boot reads natively.
 
 ## How the install works
 
-Calamares copies the live filesystem onto the target — the same image you have
-been using, so what gets installed is what you tested — and then turns that
-copy into an ordinary system. The whole install is a file copy: it needs no
-network, on any supported hardware.
+The installer does what the Arch install guide does, in its order: partition,
+`pacstrap` the base system (`base linux linux-firmware`, the CPU's microcode,
+`sudo`, NetworkManager), `genfstab`, timezone, locale, hostname, a user in
+`wheel`, systemd-boot, and then lucent's `install.sh --for-user` in a chroot for
+the desktop.
 
-That is why the ISO is ~3GB. It carries the finished desktop, every graphics
-vendor's driver and the Broadcom wireless one, because it cannot know what it
-will be installed onto. `install.sh` removes the drivers the hardware rules out
-once it knows, so an AMD laptop does not keep 900MB of NVIDIA userspace.
+The packages come from the medium. `build.sh` downloads every package the
+installer or `install.sh` could ask for, with their dependencies, into
+`/usr/share/starch/repo`, beside copies of the official `core` and `extra`
+databases they were resolved against. pacstrap and `install.sh` read them
+through `file://` servers and check signatures exactly as they would from a
+mirror: they are the same files, frozen at build time. While `install.sh` runs,
+only the target's mirrorlist points at the medium; pacman.conf is the stock one,
+so whatever `install.sh` tunes in it is what the installed system keeps. The
+real mirrorlist is written last.
 
-Copying an image has one recurring hazard, which cost several rounds to learn:
-**the live medium keeps things outside its own filesystem**, and each of them
-has to be put back by hand.
+That is why the ISO is ~3GB. The repository carries every graphics vendor's
+driver and the Broadcom wireless one, because it cannot know what it will be
+installed onto — and `install.sh` installs only what the hardware in front of
+it needs.
 
-| What | Where it really lives | Restored by |
-|---|---|---|
-| Kernel | deleted from `/boot`; a copy survives in `/usr/lib/modules` | `copy-kernel` |
-| Microcode | deleted from `/boot`; raw files survive in `/usr/lib/firmware` | `add-microcode` |
-| Pacman keyring | a tmpfs, filled at boot | `strip-live` |
-| Live user, autologin, archiso hooks | present, and must not be | `strip-live` |
-
-The first exec step checks a kernel can be found, before the partitioner runs.
-An earlier version discovered that after repartitioning, which left a machine
-with no OS and no way to finish.
+The boot entries name `/vmlinuz-linux` and `/initramfs-linux.img`, the files
+mkinitcpio's pacman hooks rewrite on every kernel upgrade, so `pacman -Syu`
+never leaves the machine booting a kernel it has deleted the modules of.
+Emergency mode opens a shell even though root has no password.
 
 ## How the profile is put together
 
@@ -173,14 +193,12 @@ the worst possible place to find out.
 
 | Layer | Source |
 |---|---|
-| Desktop packages | `extract-packages.sh`, derived from `install.sh` |
-| Installer packages | explicit list in `build.sh` |
-| Calamares | `localrepo/`, built by `tools/build-aur.sh` |
-| Calamares config | `calamares/` — sequence, modules, branding |
-| Post-install scripts | `installer/` — run in the target during the install |
+| Live system | releng, plus gum, the disk tools and the splash |
+| Offline repository | `extract-packages.sh` (from `install.sh`) and the installer's own list, resolved by pacman at build time |
+| AUR packages | `localrepo/`, built by `tools/build-aur.sh` |
+| The installer | `installer/starch-install` |
 | The desktop repo | the `lucent` submodule, by allowlist |
-| Live user | `live`, uid 1500 so the installed user gets 1000 |
-| Boot behaviour | tty1 starts the desktop; other VTs are plain shells |
+| Boot behaviour | tty1 runs the installer; other VTs are root shells |
 
 ## Rebuilding later
 
@@ -198,8 +216,10 @@ bootloader configs whenever `archiso` itself is updated.
 
 ## Caveats
 
-- Requires **UEFI**. The partitioner writes GPT with an EFI system partition
-  and installs systemd-boot; there is no BIOS path.
+- Requires **UEFI**. The installer writes GPT and installs systemd-boot; there
+  is no BIOS path, and it says so before touching a disk.
+- Installing alongside another system needs at least 20GB of unallocated space
+  on a GPT disk. Nothing is ever resized.
 - `test-boot.sh` needs a display for the graphical mode. `--monitor` drops back
   to a plain framebuffer, because QEMU cannot screenshot a GL surface.
 - The Broadcom driver is chosen from a list of eight PCI IDs. Anything else is

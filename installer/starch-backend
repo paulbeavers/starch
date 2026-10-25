@@ -373,18 +373,27 @@ configure_system() {
     sed -i 's/^#\(en_US.UTF-8 UTF-8\)/\1/' "$TARGET/etc/locale.gen"
     arch-chroot "$TARGET" locale-gen >>"$LOG" 2>&1
     echo "LANG=en_US.UTF-8" >"$TARGET/etc/locale.conf"
-    echo "KEYMAP=${ANS[keymap]}" >"$TARGET/etc/vconsole.conf"
+    # vconsole.conf only when there is something to say, as the guide has it:
+    # a US machine with a normal panel keeps the file systemd ships.
+    if [[ ${ANS[keymap]} != us || -n $CONSOLE_FONT ]]; then
+        echo "KEYMAP=${ANS[keymap]}" >"$TARGET/etc/vconsole.conf"
+        [[ -n $CONSOLE_FONT ]] && echo "FONT=$CONSOLE_FONT" >>"$TARGET/etc/vconsole.conf"
+    fi
     write_x11_keyboard
-    [[ -n $CONSOLE_FONT ]] && echo "FONT=$CONSOLE_FONT" >>"$TARGET/etc/vconsole.conf"
     echo "${ANS[hostname]}" >"$TARGET/etc/hostname"
     ok "${ANS[timezone]}, en_US.UTF-8, keyboard ${ANS[keymap]}, hostname ${ANS[hostname]}"
 
-    arch-chroot "$TARGET" useradd -m -G wheel -s /bin/bash "$u" >>"$LOG" 2>&1 \
+    # useradd's own default shell, as by hand: /usr/bin/bash, not /bin/bash.
+    arch-chroot "$TARGET" useradd -m -G wheel "$u" >>"$LOG" 2>&1 \
         || fail "could not create $u"
     printf '%s:%s\n' "$u" "${ANS[password]}" | arch-chroot "$TARGET" chpasswd \
         || fail "could not set the password"
-    echo '%wheel ALL=(ALL:ALL) ALL' >"$TARGET/etc/sudoers.d/10-wheel"
-    chmod 440 "$TARGET/etc/sudoers.d/10-wheel"
+    # The line the wiki says to uncomment with visudo, uncommented in place.
+    # A drop-in in sudoers.d works the same, and is a file a hand install
+    # does not have.
+    sed -i 's/^# \(%wheel ALL=(ALL:ALL) ALL\)$/\1/' "$TARGET/etc/sudoers"
+    arch-chroot "$TARGET" visudo -c >>"$LOG" 2>&1 && grep -q '^%wheel ALL=(ALL:ALL) ALL$' "$TARGET/etc/sudoers" \
+        || fail "could not give the wheel group sudo"
     ok "$u, with sudo through the wheel group"
 
     # Root keeps the locked password pacstrap gave it, which makes emergency

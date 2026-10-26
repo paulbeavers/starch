@@ -176,6 +176,26 @@ wait_for() {
     done
 }
 
+# Mount a filesystem mkfs has only just made. On a Samsung 870 EVO the first
+# mount straight after mkfs.ext4 failed with "wrong fs type", left nothing in
+# the kernel log, and the same mount worked a minute later: the filesystem was
+# fine, the first look at it was not. A person installing by hand never sees
+# this, because they pause between the two commands. So the type is given
+# rather than probed for, udev gets to finish with the new filesystem first,
+# and a failure is retried, with the kernel's last words in the log each time.
+mount_new() {
+    local try
+    udevadm settle 2>/dev/null
+    for try in 1 2 3 4 5; do
+        mount "$@" && return 0
+        say "mount attempt $try failed; the kernel said:"
+        dmesg | tail -n 5
+        sleep 2
+        udevadm settle 2>/dev/null
+    done
+    return 1
+}
+
 # ── preflight ─────────────────────────────────────────────────────────────────
 # Everything that can fail while the disk is still intact fails here.
 preflight() {
@@ -255,7 +275,7 @@ partition_alongside() {
     ESP=$esp
 
     mkdir -p "$WORK/esp"
-    mount -o ro "$ESP" "$WORK/esp" || fail "could not read the existing ESP"
+    mount_new -t vfat -o ro "$ESP" "$WORK/esp" || fail "could not read the existing ESP"
     avail=$(df -B1 --output=avail "$WORK/esp" | tail -1)
     umount "$WORK/esp"
 
@@ -301,27 +321,27 @@ format_and_mount() {
     # find what they expect: @ at /, @home at /home.
     if [[ ${ANS[fstype]} == btrfs ]]; then
         mkfs.btrfs -f -L starch "$ROOT_DEV" >>"$LOG" 2>&1 || fail "mkfs.btrfs failed"
-        mount "$ROOT_DEV" "$TARGET" || fail "mount failed"
+        mount_new -t btrfs "$ROOT_DEV" "$TARGET" || fail "mount failed"
         btrfs subvolume create "$TARGET/@" >>"$LOG" 2>&1 && \
             btrfs subvolume create "$TARGET/@home" >>"$LOG" 2>&1 || fail "could not create subvolumes"
         umount "$TARGET"
         local o=compress=zstd,noatime
-        mount -o "$o,subvol=@" "$ROOT_DEV" "$TARGET" || fail "mount of @ failed"
+        mount_new -t btrfs -o "$o,subvol=@" "$ROOT_DEV" "$TARGET" || fail "mount of @ failed"
         mkdir -p "$TARGET/home"
-        mount -o "$o,subvol=@home" "$ROOT_DEV" "$TARGET/home" || fail "mount of @home failed"
+        mount_new -t btrfs -o "$o,subvol=@home" "$ROOT_DEV" "$TARGET/home" || fail "mount of @home failed"
     else
         mkfs.ext4 -F -L starch "$ROOT_DEV" >>"$LOG" 2>&1 || fail "mkfs.ext4 failed"
-        mount "$ROOT_DEV" "$TARGET" || fail "mount failed"
+        mount_new -t ext4 "$ROOT_DEV" "$TARGET" || fail "mount failed"
     fi
 
     # umask 0077: systemd-boot refuses to keep its random seed on a
     # world-readable filesystem, and genfstab copies these options as given.
     local vfat=fmask=0077,dmask=0077
     mkdir -p "$TARGET/boot"
-    mount -o "$vfat" "$BOOT" "$TARGET/boot" || fail "could not mount /boot"
+    mount_new -t vfat -o "$vfat" "$BOOT" "$TARGET/boot" || fail "could not mount /boot"
     if [[ -n $XBOOTLDR ]]; then
         mkdir -p "$TARGET/efi"
-        mount -o "$vfat" "$ESP" "$TARGET/efi" || fail "could not mount the ESP"
+        mount_new -t vfat -o "$vfat" "$ESP" "$TARGET/efi" || fail "could not mount the ESP"
     fi
     ok "${ANS[fstype]} on $ROOT_DEV"
     findmnt -nR "$TARGET" -o TARGET,SOURCE

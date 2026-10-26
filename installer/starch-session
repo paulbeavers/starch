@@ -9,6 +9,13 @@
 # the front end saved its answers to state.json and exited 12 so kmscon could
 # come back with the new layout; starch-install left /run/starch/restarting,
 # and this picks up at the disk step.
+#
+# PATH above all. With none in the environment bash makes up its own and does
+# not export it, so the installer, the chroot and pacman's hooks all ran with
+# no PATH. Most tools cope; gcc does not ("cannot execute 'cc1'"), so every
+# DKMS module failed to build and a BCM4360 MacBook Air came up with no wifi.
+# This is /etc/profile's PATH, which a login shell would have set.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin
 export HOME=/root TERM=xterm-256color STARCH_KMSCON=1 LANG=C.UTF-8
 cd /root || exit 1
 

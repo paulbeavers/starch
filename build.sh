@@ -261,7 +261,7 @@ install -d "$DEST"
 # of its own directory, the guard around that is a compgen test, so a missing
 # wallpapers/ failed silently and every installed machine came up with no
 # wallpaper at all.
-for item in install.sh README.md config lucent-config wallpapers; do
+for item in install.sh README.md config lucent-config wallpapers sddm; do
     [[ -e $REPO/$item ]] || die "lucent has no $item — the embedded payload would be incomplete"
     cp -r "$REPO/$item" "$DEST/"
 done

@@ -248,17 +248,18 @@ def timezones() -> list[str]:
 # ── accounts ─────────────────────────────────────────────────────────────────
 # The installed system gets the same system accounts the medium has — both come
 # from the filesystem and systemd packages — so the medium's passwd is a fair
-# list of names a new user cannot take.
+# list of names a new user cannot take. The login manager's account is the
+# exception: sddm is installed later, by install.sh, so the medium has none.
 
 def reserved_user(name: str) -> bool:
     if FAKE:
-        return name in ("root", "bin", "daemon", "nobody", "greeter")
+        return name in ("root", "bin", "daemon", "nobody", "sddm")
     try:
         import pwd
         pwd.getpwnam(name)
         return True
     except KeyError:
-        return name == "greeter"
+        return name == "sddm"
 
 
 # ── handing over ─────────────────────────────────────────────────────────────

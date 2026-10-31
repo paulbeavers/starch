@@ -41,7 +41,7 @@
         Download the ISO
       </a>
       <p class="meta">
-        <span>RELEASE-VERSION</span><span>x86_64</span><span>UEFI &amp; BIOS</span><span>~3&nbsp;GB</span>
+        <span>RELEASE-VERSION</span><span>x86_64</span><span>UEFI</span><span>~4&nbsp;GB</span>
       </p>
     </div>
   </div>
@@ -63,9 +63,9 @@
       That assembly is the work, and it is much the same every time.
     </p>
     <p>
-      starch does the assembly. It boots a desktop that is already wired
-      together, writes it to your disk, and leaves the system working the way
-      Arch and Hyprland normally do.
+      starch does the assembly. It installs Arch the way the install guide
+      does, then puts a desktop on top that is already wired together, and
+      leaves the system working the way Arch and Hyprland normally do.
     </p>
     <p>
       starch is a starting point, not a layer. It sets the desktop up; it does
@@ -86,7 +86,11 @@
     <div class="cards">
       <div class="card">
         <h3>No custom repository</h3>
-        <p>Every package comes from the official Arch repositories.</p>
+        <p>
+          Every package comes from the official Arch repositories. The one
+          exception is Broadcom bluetooth firmware, from the AUR, and only
+          on a Mac.
+        </p>
       </div>
       <div class="card">
         <h3>No hooks or agents</h3>
@@ -118,16 +122,41 @@
 
 <section>
   <div class="wrap">
+    <h2>An install is native Arch</h2>
+    <p>
+      What starch installs is the system you would get by following the Arch
+      install guide by hand and then running the desktop's own setup script:
+      the same packages, the same enabled services, the same files in
+      <code>/etc</code>. The installer runs what the guide runs —
+      <code>pacstrap</code>, <code>genfstab</code>, a locale, a user,
+      <code>systemd-boot</code> — rather than copying itself onto your disk.
+    </p>
+    <p>
+      The image carries every package the install can ask for, so it
+      <strong>needs no network</strong>. They are checked against Arch's own
+      signatures, exactly as a mirror's would be.
+    </p>
+    <p>
+      It adds five things a hand install would not, each on purpose: a boot
+      splash, a shell in emergency mode (root is locked), a larger console font
+      on high-density panels, Broadcom bluetooth firmware on Macs, and its own
+      install log in <code>/var/log</code>. Nothing else of it stays behind.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <h2>What you get</h2>
     <p>
-      A Wayland desktop that is configured rather than assembled — 136 packages
+      A Wayland desktop that is configured rather than assembled — 137 packages
       from the official repositories, wired together and commented.
     </p>
 
     <table class="kit">
       <tbody>
         <tr><th>Compositor</th><td>hyprland, launched through uwsm</td></tr>
-        <tr><th>Login</th><td>greetd + tuigreet</td></tr>
+        <tr><th>Login</th><td>SDDM, themed to match the lock screen</td></tr>
         <tr><th>Bar</th><td>waybar</td></tr>
         <tr><th>Launcher</th><td>wofi</td></tr>
         <tr><th>Notifications</th><td>mako</td></tr>
@@ -135,14 +164,14 @@
         <tr><th>Browser</th><td>firefox</td></tr>
         <tr><th>Editors</th><td>neovim, vim</td></tr>
         <tr><th>Files</th><td>thunar + gvfs + udiskie</td></tr>
-        <tr><th>Lock, idle, wallpaper</th><td>hyprlock, hypridle, hyprpaper</td></tr>
+        <tr><th>Lock, idle, wallpaper</th><td>hyprlock, hypridle, swaybg</td></tr>
         <tr><th>Audio</th><td>PipeWire + WirePlumber</td></tr>
         <tr><th>Graphics</th><td>Mesa, plus the driver for your detected card</td></tr>
         <tr><th>Screenshots</th><td>grim + slurp + swappy</td></tr>
         <tr><th>Clipboard</th><td>wl-clipboard + cliphist</td></tr>
         <tr><th>On-screen display</th><td>swayosd, for volume and brightness</td></tr>
         <tr><th>Settings</th><td>lucent-config — scale, idle, input, theme</td></tr>
-        <tr><th>Themes</th><td>14, switched live with <code>SUPER+SHIFT+T</code></td></tr>
+        <tr><th>Themes</th><td>15, switched live with <code>SUPER+SHIFT+T</code></td></tr>
       </tbody>
     </table>
   </div>
@@ -269,10 +298,13 @@ DEV=/dev/sdX
 <span class="c"># refuse to continue unless that really is a block device</span>
 [ -b "$DEV" ] || { echo "REFUSING: $DEV is not a block device"; exit 1; }
 
-sudo dd if=starch-x86_64.iso of="$DEV" bs=4M status=progress oflag=direct conv=fsync
+sudo dd if=starch-RELEASE-VERSION-x86_64.iso of="$DEV" bs=4M status=progress oflag=direct conv=fsync
 sync</pre>
     <p style="margin-top:22px">
-      Boot it, and the desktop comes up with the installer on top of it.
+      Boot it and the installer starts. It asks four things — keyboard, disk,
+      account and a final review — and writes nothing until you confirm. The
+      disk can be erased or the install put in free space beside another
+      system, and encrypted with LUKS2 if you choose.
     </p>
   </div>
 </section>
@@ -281,8 +313,8 @@ sync</pre>
   <div class="wrap">
     <h2>Get it</h2>
     <p>
-      One file. Write it to a stick, boot it, and decide whether you like the
-      desktop before you install anything.
+      One file. Write it to a stick, boot it and answer four questions. After
+      a restart the machine is running Arch, with the desktop configured.
     </p>
     <div class="get" style="align-items:flex-start;margin-top:22px">
       <!-- EDIT ME: the same S3 object URL as the button at the top -->
@@ -290,7 +322,7 @@ sync</pre>
         Download the ISO
       </a>
       <p class="meta">
-        <span>RELEASE-VERSION</span><span>x86_64</span><span>UEFI &amp; BIOS</span><span>~3&nbsp;GB</span>
+        <span>RELEASE-VERSION</span><span>x86_64</span><span>UEFI</span><span>~4&nbsp;GB</span>
       </p>
       <p class="meta" style="margin-top:2px">
         <a href="https://REPLACE-ME.s3.amazonaws.com/starch-x86_64.iso.sha256">sha256 checksum</a>

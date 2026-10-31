@@ -619,22 +619,59 @@ DBPATH="$WORK/offline-db"
 CONF="$WORK/offline-pacman.conf"
 rm -rf "$REPO_DIR" "$LOCAL_DIR" "$DBPATH"
 install -d "$REPO_DIR" "$LOCAL_DIR" "$DBPATH"
-{
-    # Not the build host's [options]: an IgnorePkg or CacheDir there would
-    # quietly change what lands on the medium.
-    printf '[options]\nArchitecture = auto\nSigLevel = Required DatabaseOptional\n'
-    printf 'ParallelDownloads = 5\n'
-    printf '\n[core]\nInclude = /etc/pacman.d/mirrorlist\n'
-    printf '\n[extra]\nInclude = /etc/pacman.d/mirrorlist\n'
-    printf '\n[%s]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$LOCALDB" "$LOCALREPO"
-} > "$CONF"
+# The host's mirrors, but as Server lines this script owns rather than an
+# Include, so a broken mirror can be dropped and the sync tried again.
+mapfile -t MIRRORS < <(sed -n 's/^[[:space:]]*Server[[:space:]]*=[[:space:]]*//p' \
+                       /etc/pacman.d/mirrorlist)
+(( ${#MIRRORS[@]} )) || die "no Server lines in /etc/pacman.d/mirrorlist"
+
+write_offline_conf() {  # write_offline_conf <first mirror index>
+    local m
+    {
+        # Not the build host's [options]: an IgnorePkg or CacheDir there would
+        # quietly change what lands on the medium.
+        printf '[options]\nArchitecture = auto\nSigLevel = Required DatabaseOptional\n'
+        printf 'ParallelDownloads = 5\n'
+        for repo in core extra; do
+            printf '\n[%s]\n' "$repo"
+            for m in "${MIRRORS[@]:$1}"; do printf 'Server = %s\n' "$m"; done
+        done
+        printf '\n[%s]\nSigLevel = Optional TrustAll\nServer = file://%s\n' "$LOCALDB" "$LOCALREPO"
+    } > "$CONF"
+}
+
+# How many packages a sync database lists; 0 for a missing or empty one.
+db_entries() {
+    bsdtar -tf "$1" 2>/dev/null | grep -c '/desc$' || true
+}
 
 offline_pkgs=(base linux linux-firmware sudo networkmanager dosfstools
               intel-ucode amd-ucode btrfs-progs plymouth terminus-font)
 mapfile -t -O "${#offline_pkgs[@]}" offline_pkgs < <("$HERE/extract-packages.sh")
 
-pacman --config "$CONF" --dbpath "$DBPATH" -Sy >/dev/null \
-    || die "could not sync package databases for the offline repository"
+# A mirror part way through its own sync can answer 200 with an empty
+# database. pacman takes the first mirror that answers and stores what it
+# got, the databases are not signed, so nothing complains — every package
+# in that repository is then "target not found", which is how it showed up
+# on 2026-10-31 (us.mirrors.cicku.me, a 0-byte extra.db). So each database
+# is checked, and a sync that gets an empty one drops the mirror that served
+# it and tries again from the next.
+first=0
+while :; do
+    (( first < ${#MIRRORS[@]} )) || die "every mirror in /etc/pacman.d/mirrorlist served an empty database"
+    write_offline_conf "$first"
+    rm -rf "$DBPATH/sync"
+    pacman --config "$CONF" --dbpath "$DBPATH" -Sy >/dev/null \
+        || die "could not sync package databases for the offline repository"
+    bad=""
+    for repo in core extra; do
+        (( $(db_entries "$DBPATH/sync/$repo.db") > 0 )) || bad+=" $repo"
+    done
+    [[ -z $bad ]] && break
+    warn "${MIRRORS[first]} served an empty${bad} database; trying the next mirror"
+    (( first++ )) || true
+done
+(( first == 0 )) || ok "databases from ${MIRRORS[first]}"
 pacman --config "$CONF" --dbpath "$DBPATH" --cachedir "$REPO_DIR" \
        -Sw --noconfirm "${offline_pkgs[@]}" \
     || die "could not download the offline repository"

@@ -57,6 +57,28 @@ die()  { printf '\n%sERROR:%s %s\n' "$C_R" "$C_0" "$1" >&2; exit 1; }
 CHECK_ONLY=0
 ASSEMBLE_ONLY=0
 REUSE_WORK=0
+# Remove the work directory, which a build that stopped part way can leave
+# with filesystems still mounted inside it: mkarchiso's pacstrap mounts proc,
+# sys and dev in the airootfs, and an interrupted run does not unmount them.
+# rm cannot remove a mountpoint, and recursing into a live /proc is the last
+# thing anyone wants, so unmount everything under it first, deepest first,
+# and never let rm cross into a filesystem that is still there.
+remove_work() {
+    [[ -e $WORK ]] || return 0
+    local m err
+    if [[ $EUID -eq 0 ]]; then
+        while read -r m; do
+            umount -l "$m" 2>/dev/null || true
+        done < <(awk -v w="$WORK/" 'index($2, w) == 1 { print $2 }' /proc/mounts | sort -r)
+    fi
+    if ! err="$(rm -rf --one-file-system "$WORK" 2>&1)"; then
+        if [[ $EUID -ne 0 ]]; then
+            die "cannot remove $WORK (root-owned from a previous build) — sudo $0 --clean"
+        fi
+        die "cannot remove $WORK: $(head -1 <<<"$err")"
+    fi
+}
+
 for a in "$@"; do
     case "$a" in
         --check)    CHECK_ONLY=1 ;;
@@ -64,8 +86,7 @@ for a in "$@"; do
         --reuse)    REUSE_WORK=1 ;;
         --clean)
             rm -rf "$HERE/work-assemble" 2>/dev/null || true
-            rm -rf "$WORK" 2>/dev/null \
-                || die "cannot remove $WORK (root-owned from a previous build) — sudo $0 --clean"
+            remove_work
             ok "removed the work directories"; exit 0 ;;
         *) die "unknown option: $a" ;;
     esac
@@ -159,7 +180,7 @@ step "Assembling profile"
 # a stale ISO, so start clean unless explicitly told not to.
 if [[ -d $WORK && $REUSE_WORK -eq 0 ]]; then
     warn "removing the previous work directory (--reuse to keep it)"
-    rm -rf "$WORK" 2>/dev/null || die "cannot remove $WORK (root-owned from a previous build) — sudo $0 --clean"
+    remove_work
 fi
 rm -rf "$PROFILE"; mkdir -p "$PROFILE" "$OUT"
 cp -r "$RELENG/." "$PROFILE/"
@@ -672,6 +693,17 @@ while :; do
     (( first++ )) || true
 done
 (( first == 0 )) || ok "databases from ${MIRRORS[first]}"
+
+# mkarchiso installs the live system with the profile's pacman.conf, which
+# reads the same mirrorlist; left alone, it went back to the mirror just
+# dropped and failed on the same empty database, after the offline repository
+# had downloaded fine. So it gets the list that passed, as Server lines.
+# Build time only: the medium's own /etc/pacman.conf is the pacman package's.
+servers="$(printf 'Server = %s\n' "${MIRRORS[@]:$first}")"
+awk -v servers="$servers" '
+    /^[[:space:]]*Include[[:space:]]*=[[:space:]]*\/etc\/pacman\.d\/mirrorlist/ { print servers; next }
+    { print }
+' "$PROFILE/pacman.conf" > "$PROFILE/pacman.conf.new" && mv "$PROFILE/pacman.conf.new" "$PROFILE/pacman.conf"
 pacman --config "$CONF" --dbpath "$DBPATH" --cachedir "$REPO_DIR" \
        -Sw --noconfirm "${offline_pkgs[@]}" \
     || die "could not download the offline repository"

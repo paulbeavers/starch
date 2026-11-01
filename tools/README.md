@@ -59,8 +59,9 @@ Two things that cost an afternoon:
 - **Scroll needs `axis_source`, `axis_discrete` *and* `axis` before `frame`.**
   Without the plain `axis` value GTK clients ignore it entirely, while
   Hyprland's own keybinds still fire — so it looks like the toolkit is broken
-  rather than the injection. Sending both also makes waybar count two ticks,
-  so expect a scroll to move two workspaces.
+  rather than the injection. Sending both also made waybar count two ticks,
+  so a scroll moved two workspaces; the Quickshell bar that replaced it
+  counts angle delta in notches of 120 and has not been checked against this.
 
 ## `install-manifest` — is this install native?
 

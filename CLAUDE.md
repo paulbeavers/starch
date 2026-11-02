@@ -165,8 +165,32 @@ moved several of them. Before removing any, read why it is there.
 | Retina console | kmscon on the medium; `starch-install` doubles Terminus on the plain-console fallback; `FONT=ter-v32b` in the target's vconsole.conf | 8x16 on 2560/2880-wide panels is unreadable — including the LUKS prompt |
 | Mac keyboard, notch, Parallels | lucent | see lucent's CLAUDE.md |
 
-Two lessons from the live desktop, kept because they are about the hardware,
-not about Calamares:
+**Open and parked: a MacBookPro11,5 never wakes from suspend.** This is the
+mid-2015 15" (Iris Pro plus AMD Cape Verde), not the 2013 model. It hangs hard
+on a starch install, with no Caps Lock light. What tests on the machine showed:
+
+- Forcing s2idle still hangs, and so does unloading brcmfmac.
+- `pm_test=devices` hangs, so it is a driver's resume, not firmware.
+- `module_blacklist=radeon,amdgpu` makes the devices test come back, so **radeon
+  is the cause**. `radeon.si_support=0 amdgpu.si_support=1` still hangs.
+- pm_trace is useless here: Apple firmware clobbers the RTC, so its "hash matches"
+  is a false match. apple-gmux has no module parameters on kernel 7.2.
+
+The next step was given and never run. Set the EFI variable
+`gpu-power-prefs-fa4ce28d-b62f-4c99-9cc3-6815686e30f9` to
+`\x07\x00\x00\x00\x01\x00\x00\x00` (`chattr -i` first) so firmware boots on the
+Intel GPU, power off fully, then test `pm_test` devices and a real suspend. If it
+still hangs, add `module_blacklist=radeon,amdgpu`. A black screen is recovered by
+an NVRAM reset (Option+Cmd+P+R). The fix belongs in lucent's `install.sh`, gated
+on the DMI product or the dGPU's PCI ID, as `/etc` files plus the NVRAM write,
+with nothing on the kernel command line. The owner cannot paste output from that
+machine, so ask for a few readable lines or a photo.
+
+**The ISO has no live desktop now.** It boots the text installer; Hyprland, the
+bar and the theming first run at the first login of an installed machine. When
+listing what to check after a build, say that, never "the live session". Two
+lessons from the old live desktop, kept because they are about the hardware, not
+about Calamares:
 
 - **`start-hyprland` exited immediately on a 2013 13" MacBook Pro** and was
   fine on a 15" and in a VM, which is how it shipped. If anything starts
@@ -222,6 +246,64 @@ Access Control, the policy naming that one distribution, and the Route 53
 alias. Only it writes the bucket policy; a publish script that also wrote one
 would undo the lockdown every time someone fixed a typo. Both take
 `--dry-run`.
+
+## Setting up a fresh machine
+
+The two repos sit side by side, because lucent's post-commit hook finds starch
+at `../starch`. Hooks live in `.git`, so a clone has none until it is installed:
+
+    mkdir -p ~/gitwork && cd ~/gitwork
+    git clone git@github.com:paulbeavers/lucent.git
+    git clone --recurse-submodules git@github.com:paulbeavers/starch.git
+    lucent/tools/git-hooks/install
+
+Elsewhere in this file `~/lucent` means that checkout, `~/gitwork/lucent`.
+`aws login` is needed before publishing. Both repos are public, so private notes
+and session history do not go in them.
+
+## Working with the owner
+
+- Commit and push when asked, usually "push it". Say what is ready and wait.
+- The owner builds ISOs and tests on real hardware. Hand over what to check.
+- For a machine or VM you cannot reach, write the diagnostic as a script they can
+  copy over, which saves its output to a file they can bring back. Pasted
+  one-liners do not survive that trip.
+- Before writing a theory down as fact, get it confirmed on the machine.
+
+## Virtual machines on Apple silicon
+
+Parallels is ruled out by its price, so the guests run under UTM and VMware
+Fusion. **lucent works in both** (owner-confirmed, Fedora guests); lucent's
+CLAUDE.md has the workarounds. Still open:
+
+- **Everything is soft in UTM when scaled.** It is host-side, not lucent: with
+  Retina mode off, macOS stretches a half-density guest. Suggested and not tried:
+  Retina mode on in the VM's display settings, then scale 2 (or about 1.6) in
+  lucent-config.
+- **Why Hyprland refuses GPU buffers under VMware is not established.** The fixes
+  are workarounds and may need revisiting after a Hyprland update. mpv is not
+  covered there and needs `vo=wlshm` by hand.
+- **A self-contained Mac app like Try Omarchy** (not started; ARM disk image and
+  Mac launcher, in its own repo). The recommended route is to fork
+  github.com/omacom/try-omarchy (MIT) with an Arch Linux ARM and lucent guest, and
+  no Omarchy in it. It is QEMU on HVF with about 35 patches and VirGL on Apple's
+  OpenGL, a Swift launcher, and a guest image built by pacstrap in an ARM64
+  container. As of 2026-10-25 Arch Linux ARM has every lucent desktop package
+  except x86 and Mac hardware items. The Mac side needs macOS and Xcode, so the
+  owner builds and tests it, and distributing it needs an Apple Developer ID.
+
+## Open work as of 2026-11-02
+
+- **Rebuild the ISO.** The last good one, `starch-2026.10.31`, predates the VMware
+  fixes and the pointer speed option. The 2026-11-02 rebuild failed in the offline
+  repository download: `mirrors.kernel.org` stalled and `mirrors.logal.dev` cannot
+  resume. That is the mirrors, not the code. Comment those out in
+  `/etc/pacman.d/mirrorlist` and build again.
+- **Make that download survive a stall.** Offered, not done. `build.sh` deletes the
+  repository before downloading, so a retry restarts the whole 2 GiB. It could
+  retry and keep what it has, clearing partial files between tries.
+- **Publish the website** after the rebuild: `./tools/deploy-web.sh --dry-run`,
+  then for real. `web/` is already updated.
 
 ## Do not run sudo from a tool call
 
